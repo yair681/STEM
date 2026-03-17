@@ -2268,14 +2268,14 @@ function updateCars(dt){
       document.getElementById('taxiStatus').textContent='';
       flashHUD('🚕 הגעת ליעד!');
     } else {
-      // Steer toward destination
-      const targetAngle=Math.atan2(-tdx,-tdz);
+      // Steer toward destination (correct angle: atan2(-tdx, tdz))
+      const targetAngle=Math.atan2(-tdx,tdz);
       const angleDiff=Math.atan2(Math.sin(targetAngle-car.rot),Math.cos(targetAngle-car.rot));
-      car.rot+=angleDiff*Math.min(1,Math.abs(angleDiff))*dt*3;
+      car.rot+=angleDiff*dt*5;
       yaw=car.rot;
       // Slow down near dest
-      const taxiSpeed=tdist<20?Math.max(5,tdist*0.8):18;
-      car.vel=Math.min(taxiSpeed,car.vel+8*dt);
+      const taxiSpeed=tdist<20?Math.max(4,tdist*0.7):20;
+      car.vel=Math.min(taxiSpeed,car.vel+10*dt);
     }
   }
   // Acceleration (manual, only if not taxi)
