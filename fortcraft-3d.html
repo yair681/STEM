@@ -587,6 +587,8 @@ function shoot(){
     lootBoxes.forEach(b=>{if(!b.isOpen)targets.push(b.mesh);});
     // remote players
     Object.entries(remotePlayerMeshes).forEach(([id,g])=>g.children.filter(c=>c.isMesh).forEach(m=>{m.userData.remoteId=id;targets.push(m);}));
+    // server bots (co-op)
+    Object.entries(roomBotMeshes).forEach(([id,g])=>g.children.filter(c=>c.isMesh).forEach(m=>{m.userData.botId=id;targets.push(m);}));
     const hits=rc.intersectObjects(targets,false);
     if(hits.length>0){
       const h=hits[0];
@@ -594,6 +596,13 @@ function shoot(){
       // loot box hit?
       const hitBox=lootBoxes.find(b=>!b.isOpen&&b.mesh===h.object);
       if(hitBox){hitLootBox(hitBox,h.point);continue;}
+      // server bot hit?
+      if(h.object.userData.botId){
+        const dmg=WEAPONS[currentWeaponKey].damage+Math.floor(Math.random()*10);
+        spawnText(h.point,`-${dmg}`,'#ff4444');
+        socket?.emit('botHit',{botId:h.object.userData.botId,damage:dmg});
+        continue;
+      }
       // remote player hit?
       if(h.object.userData.remoteId){
         const dmg=WEAPONS[currentWeaponKey].damage+Math.floor(Math.random()*10);
@@ -898,6 +907,39 @@ function switchWeapon(){
 let socket=null;
 const remotePlayers={};
 const remotePlayerMeshes={};
+const roomBotMeshes={}; // server-controlled bots in multiplayer
+
+function createBotMesh(bot){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(.75,1.1,.4),new THREE.MeshLambertMaterial({color:0x9b1c2e}));
+  body.position.y=1.3; body.castShadow=true; g.add(body);
+  const head=new THREE.Mesh(new THREE.BoxGeometry(.55,.55,.55),new THREE.MeshLambertMaterial({color:0xfde68a}));
+  head.position.y=2.15; head.castShadow=true; g.add(head);
+  const gun=new THREE.Mesh(new THREE.BoxGeometry(.08,.08,.4),new THREE.MeshLambertMaterial({color:0x222222}));
+  gun.position.set(.4,1.2,-.15); gun.rotation.y=Math.PI/2; g.add(gun);
+  const barBg=new THREE.Mesh(new THREE.PlaneGeometry(1,.12),new THREE.MeshBasicMaterial({color:0x333333,depthTest:false}));
+  barBg.position.y=2.9; g.add(barBg);
+  const barFill=new THREE.Mesh(new THREE.PlaneGeometry(1,.12),new THREE.MeshBasicMaterial({color:0x00ee44,depthTest:false}));
+  barFill.position.set(-.001,2.901,.001); g.add(barFill);
+  g.userData={botId:bot.id,barFill};
+  g.children.forEach(c=>{if(c.isMesh)c.userData.botId=bot.id;});
+  g.position.set(bot.x,0,bot.z);
+  scene.add(g);
+  roomBotMeshes[bot.id]=g;
+  return g;
+}
+function updateBotMesh(bot){
+  if(!roomBotMeshes[bot.id]) createBotMesh(bot);
+  const g=roomBotMeshes[bot.id];
+  g.position.set(bot.x,0,bot.z);
+  g.rotation.y=bot.rotY||0;
+  const pct=Math.max(0,bot.hp/(bot.maxHp||100));
+  const bar=g.userData.barFill;
+  if(bar){bar.scale.x=pct;bar.position.x=(pct-1)*.5;bar.material.color.setHex(pct>.5?0x00ee44:pct>.25?0xffaa00:0xff2200);bar.lookAt(camera.position);g.children[g.children.length-2]?.lookAt(camera.position);}
+}
+function removeBotMesh(id){
+  if(roomBotMeshes[id]){scene.remove(roomBotMeshes[id]);delete roomBotMeshes[id];}
+}
 
 function connectSocket(){
   try{
@@ -926,17 +968,40 @@ function connectSocket(){
       if(mode) roomGameMode=mode;
       if(timeLimit) roomTimeLimit=timeLimit;
     });
-    socket.on('gameStart',({mode,timeLimit})=>{
+    socket.on('gameStart',({mode,timeLimit,bots})=>{
       roomGameMode=mode||'ffa';
       roomTimeLimit=timeLimit||10;
       isSolo=false;
       beginGame();
+      // Init co-op bots from server
+      if(bots&&bots.length>0) bots.forEach(b=>createBotMesh(b));
     });
     socket.on('playerUpdate',(data)=>{
       if(data.id===socket?.id) return;
       updateRemotePlayer(data);
     });
     socket.on('playerLeft',({id})=>{removeRemotePlayer(id);});
+    // Bot events
+    socket.on('botState',(bots)=>{
+      if(!Array.isArray(bots)) return;
+      const activeIds=new Set(bots.map(b=>b.id));
+      Object.keys(roomBotMeshes).forEach(id=>{if(!activeIds.has(id))removeBotMesh(id);});
+      bots.forEach(b=>updateBotMesh(b));
+    });
+    socket.on('botSpawned',(bot)=>createBotMesh(bot));
+    socket.on('botDied',({botId,killerId,scores})=>{
+      if(roomBotMeshes[botId]){
+        spawnText(roomBotMeshes[botId].position.clone().add(new THREE.Vector3(0,2,0)),'💀','#ff4444');
+        removeBotMesh(botId);
+      }
+      if(killerId===socket?.id){kills++;document.getElementById('killCount').textContent=kills;}
+      const kName=scores?.[killerId]?.name||'?';
+      addKillFeed(kName,'AI bot');
+    });
+    socket.on('waveUpdate',({wave})=>{
+      document.getElementById('waveNum').textContent=wave;
+      spawnText(camera.position.clone().add(new THREE.Vector3(0,1,-4).applyQuaternion(camera.quaternion)),`WAVE ${wave}!`,'#ffcc00');
+    });
     socket.on('hit',({damage,health})=>{
       hp=Math.max(0,health);
       updateHUD();
@@ -1068,8 +1133,8 @@ function beginGame(){
   showScreen('startScreen');
   document.getElementById('startScreen').style.display='none';
   document.getElementById('hud').style.display='block';
-  if(isSolo) document.getElementById('waveDisplay').style.display='block';
-  else document.getElementById('waveDisplay').style.display='none';
+  const showWave=isSolo||(roomGameMode==='coop');
+  document.getElementById('waveDisplay').style.display=showWave?'block':'none';
   // Init weapons
   playerWeapons={rifle:{ammo:30,reserve:120}};
   currentWeaponKey='rifle';
