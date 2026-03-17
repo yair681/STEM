@@ -256,6 +256,9 @@ canvas{display:block;position:fixed;top:0;left:0;}
   <div id="killFeed"></div>
   <div id="scoreboard"><h3>📊 טבלת ניקוד</h3><div id="sbContent"></div></div>
   <div id="instructions">ESC — פוס (Solo)<br>TAB — ניקוד<br>R — טעינה<br>F — לקחת נשק<br>X — החלף נשק<br>B — בנייה<br>T — צ'אט<br>Shift — ריצה<br>E — רכב/חנות<br>G — רימון<br>Z — אמוג'י</div>
+  <div id="carHUD" style="display:none;position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:white;padding:10px 26px;border-radius:14px;font-size:15px;border:2px solid #ffcc00;text-align:center;">
+    🚗 <b id="carSpeedNum">0</b> קמ"ש &nbsp;|&nbsp; <span style="color:#aaa;font-size:12px;">W/S נסיעה &nbsp; עכבר היגוי &nbsp; E לצאת</span>
+  </div>
 </div>
 <div id="chatBox"></div>
 <input id="chatInput" placeholder="💬 הודעה... (Enter לשלוח, Esc לסגור)">
@@ -580,8 +583,13 @@ function mkTree(x,z){
   scene.add(g); envObjects.push(g); return g;
 }
 function mkRock(x,z){
-  const r=new THREE.Mesh(new THREE.DodecahedronGeometry(1.2+Math.random()*.6,0),new THREE.MeshLambertMaterial({color:0x8a8a8a}));
-  r.position.set(x,.7,z); r.rotation.set(Math.random()*6,Math.random()*6,Math.random()*6);
+  // Natural boulder: low-poly sphere flattened, color variation
+  const size=1.2+Math.random()*.8;
+  const cols=[0x8a8a8a,0x797979,0x9a9090,0x7a8070];
+  const col=cols[Math.floor(Math.random()*cols.length)];
+  const r=new THREE.Mesh(new THREE.SphereGeometry(size,6,4),new THREE.MeshLambertMaterial({color:col}));
+  r.scale.set(1.2+Math.random()*.4, 0.55+Math.random()*.2, 1.0+Math.random()*.4);
+  r.position.set(x,size*.28,z); r.rotation.y=Math.random()*Math.PI;
   r.castShadow=true; r.receiveShadow=true; r.userData={isRock:true,stone:25};
   scene.add(r); envObjects.push(r); return r;
 }
@@ -966,9 +974,9 @@ function setDiff(d){
   document.querySelectorAll('.diffBtn').forEach(b=>b.classList.toggle('sel',b.dataset.d===d));
 }
 const DIFF={
-  easy:  {enemyDmgMult:.5, enemySpeedMult:.7, enemyAccMult:.5, healSelf:false},
-  medium:{enemyDmgMult:1,  enemySpeedMult:1,  enemyAccMult:1,  healSelf:true},
-  hard:  {enemyDmgMult:1.6,enemySpeedMult:1.4,enemyAccMult:1.4,healSelf:true}
+  easy:  {enemyDmgMult:.35, enemySpeedMult:.6,  enemyAccMult:.4,  healSelf:false},
+  medium:{enemyDmgMult:.65, enemySpeedMult:.85, enemyAccMult:.75, healSelf:true},
+  hard:  {enemyDmgMult:1.1, enemySpeedMult:1.2, enemyAccMult:1.1, healSelf:true}
 };
 
 // ─── MINIGUN WARM-UP ─────────────────────────────────────────────────────────
@@ -2229,35 +2237,34 @@ function mkCar(x,z,color){
 }
 
 function updateCars(dt){
-  cars.forEach(car=>{
-    if(car.occupied&&car===currentCar&&inCar){
-      // Steering: use yaw from mouse
-      car.rot=yaw;
-      // Acceleration
-      const accel=12, brake=18, friction=8, maxFwd=32, maxRev=-10;
-      if(keys['KeyW']||keys['ArrowUp']){
-        car.vel=Math.min(maxFwd,car.vel+accel*dt);
-      } else if(keys['KeyS']||keys['ArrowDown']){
-        car.vel=Math.max(maxRev,car.vel-brake*dt);
-      } else {
-        // friction
-        if(car.vel>0) car.vel=Math.max(0,car.vel-friction*dt);
-        else if(car.vel<0) car.vel=Math.min(0,car.vel+friction*dt);
-      }
-      // Move car
-      car.pos.x+=Math.sin(-car.rot)*car.vel*dt;
-      car.pos.z+=Math.cos(-car.rot)*car.vel*dt;
-      car.mesh.position.copy(car.pos);
-      car.mesh.rotation.y=car.rot;
-      // Sync player to car
-      playerPos.x=car.pos.x;
-      playerPos.z=car.pos.z;
-      playerPos.y=car.pos.y+1.8;
-      // Update camera
-      camera.position.copy(playerPos);
-      camera.rotation.order='YXZ'; camera.rotation.y=yaw; camera.rotation.x=pitch;
-    }
-  });
+  const carHudEl=document.getElementById('carHUD');
+  const carSpeedEl=document.getElementById('carSpeedNum');
+  if(!inCar||!currentCar){if(carHudEl)carHudEl.style.display='none';return;}
+  const car=currentCar;
+  // Steering: car rotates toward yaw gradually (not instant snap)
+  const steerDiff=yaw-car.rot;
+  const steerNorm=Math.atan2(Math.sin(steerDiff),Math.cos(steerDiff));
+  car.rot+=steerNorm*Math.min(1,Math.abs(car.vel/10)+0.3)*dt*4;
+  // Acceleration
+  const accel=16, brakeForce=22, friction=10, maxFwd=30, maxRev=-10;
+  if(keys['KeyW']||keys['ArrowUp']) car.vel=Math.min(maxFwd,car.vel+accel*dt);
+  else if(keys['KeyS']||keys['ArrowDown']) car.vel=Math.max(maxRev,car.vel-brakeForce*dt);
+  else car.vel+=(car.vel>0?-1:car.vel<0?1:0)*friction*dt, (Math.abs(car.vel)<0.2&&(car.vel=0));
+  // Move
+  car.pos.x+=Math.sin(-car.rot)*car.vel*dt;
+  car.pos.z+=Math.cos(-car.rot)*car.vel*dt;
+  car.pos.x=Math.max(-195,Math.min(195,car.pos.x));
+  car.pos.z=Math.max(-195,Math.min(195,car.pos.z));
+  car.mesh.position.copy(car.pos);
+  car.mesh.rotation.y=car.rot;
+  // Rotate wheels visually
+  car.mesh.children.filter((_,i)=>i>=5&&i<=8).forEach(w=>w.rotation.x+=car.vel*dt*1.5);
+  // Sync player
+  playerPos.set(car.pos.x,car.pos.y+1.8,car.pos.z);
+  camera.position.copy(playerPos);
+  camera.rotation.order='YXZ'; camera.rotation.y=yaw; camera.rotation.x=pitch;
+  // Update HUD
+  if(carHudEl){carHudEl.style.display='block';carSpeedEl.textContent=Math.round(Math.abs(car.vel)*3.6);}
 }
 
 function enterExitCar(){
@@ -2277,13 +2284,36 @@ function enterExitCar(){
 
 // ─── SHOP SYSTEM ─────────────────────────────────────────────────────────────
 function mkShop(x,z){
-  const mat=new THREE.MeshLambertMaterial({color:0xff8800,emissive:0xffaa00,emissiveIntensity:0.4});
-  const mesh=new THREE.Mesh(new THREE.BoxGeometry(1.5,2,1.5),mat);
-  mesh.position.set(x,1,z); mesh.castShadow=true; scene.add(mesh);
-  // Glow light
-  const light=new THREE.PointLight(0xffaa00,1.5,8);
-  light.position.set(x,2.5,z); scene.add(light);
-  shopMeshes.push({mesh,light,pos:new THREE.Vector3(x,1,z)});
+  const g=new THREE.Group();
+  // Kiosk base
+  const base=new THREE.Mesh(new THREE.BoxGeometry(2.2,1.2,2.2),new THREE.MeshLambertMaterial({color:0xffaa00,emissive:0xff8800,emissiveIntensity:0.3}));
+  base.position.y=0.6; base.castShadow=true; g.add(base);
+  // Counter top
+  const top=new THREE.Mesh(new THREE.BoxGeometry(2.4,0.12,2.4),new THREE.MeshLambertMaterial({color:0xffdd55,emissive:0xffcc00,emissiveIntensity:0.4}));
+  top.position.y=1.26; g.add(top);
+  // Tall sign pole
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.07,5,8),new THREE.MeshLambertMaterial({color:0x888888}));
+  pole.position.set(0,3.7,0); g.add(pole);
+  // Sign board on pole
+  const sign=new THREE.Mesh(new THREE.BoxGeometry(2.2,0.9,0.15),new THREE.MeshLambertMaterial({color:0xff6600,emissive:0xff4400,emissiveIntensity:0.6}));
+  sign.position.set(0,6.4,0); g.add(sign);
+  // "$" symbol on sign
+  const dollar=new THREE.Mesh(new THREE.BoxGeometry(0.18,0.7,0.18),new THREE.MeshLambertMaterial({color:0xffff00,emissive:0xffee00,emissiveIntensity:1}));
+  dollar.position.set(0,6.4,0.12); g.add(dollar);
+  // Floating name label sprite
+  const cv=document.createElement('canvas'); cv.width=256; cv.height=80;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle='rgba(255,100,0,0.85)'; ctx.roundRect(4,4,248,72,14); ctx.fill();
+  ctx.fillStyle='#ffff00'; ctx.font='bold 32px Arial'; ctx.textAlign='center';
+  ctx.fillText('🛒 SHOP',128,50);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv),transparent:true,depthTest:false}));
+  sp.scale.set(4,1.25,1); sp.position.set(0,8,0); g.add(sp);
+  g.position.set(x,0,z);
+  scene.add(g);
+  // Bright glow
+  const light=new THREE.PointLight(0xffaa00,3,18);
+  light.position.set(x,4,z); scene.add(light);
+  shopMeshes.push({mesh:g,light,pos:new THREE.Vector3(x,0,z)});
 }
 
 const SHOP_ITEMS=[
