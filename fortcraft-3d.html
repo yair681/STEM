@@ -2252,10 +2252,12 @@ function updateCars(dt){
   const carSpeedEl=document.getElementById('carSpeedNum');
   if(!inCar||!currentCar){if(carHudEl)carHudEl.style.display='none';return;}
   const car=currentCar;
-  // Steering: car rotates toward yaw gradually (not instant snap)
-  const steerDiff=yaw-car.rot;
-  const steerNorm=Math.atan2(Math.sin(steerDiff),Math.cos(steerDiff));
-  car.rot+=steerNorm*Math.min(1,Math.abs(car.vel/10)+0.3)*dt*4;
+  // Manual steering only when not in taxi mode
+  if(!taxiDriving){
+    const steerDiff=yaw-car.rot;
+    const steerNorm=Math.atan2(Math.sin(steerDiff),Math.cos(steerDiff));
+    car.rot+=steerNorm*Math.min(1,Math.abs(car.vel/10)+0.3)*dt*4;
+  }
   // Taxi auto-drive
   if(taxiDriving&&taxiDest){
     const tdx=taxiDest.x-car.pos.x, tdz=taxiDest.z-car.pos.z;
