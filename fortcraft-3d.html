@@ -83,8 +83,25 @@ canvas{display:block;position:fixed;top:0;left:0;}
 .map-card h3{font-size:13px;color:#fff;margin-bottom:2px;}
 .map-card p{font-size:10px;color:#888;}
 /* Non-admin info panel */
-#roomInfoPanel{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:10px 18px;margin:6px 0;font-size:13px;color:#ccc;text-align:right;width:380px;}
+#roomInfoPanel{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:10px 18px;margin:6px 0;font-size:13px;color:#ccc;text-align:right;width:100%;}
 #roomInfoPanel div{margin:3px 0;}
+/* Lobby 2-column layout */
+#lobbyInner{display:flex;gap:18px;width:100%;max-width:860px;align-items:flex-start;padding:0 14px;}
+#lobbyLeft{flex:1;min-width:0;}
+#lobbyRight{width:300px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;}
+/* Shop overlay */
+#shopOverlay{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.92);border:2px solid #ffcc00;border-radius:16px;padding:24px;z-index:400;color:white;min-width:340px;}
+/* Achievement toast */
+#achievToast{position:fixed;bottom:100px;right:18px;z-index:500;pointer-events:none;}
+.achiev-item{background:rgba(0,0,0,.9);border:2px solid #ffcc00;border-radius:12px;padding:10px 18px;margin-bottom:8px;color:white;font-size:14px;animation:slideIn .3s;max-width:280px;}
+@keyframes slideIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}
+/* Flash message overlay */
+#flashMsgOverlay{position:fixed;top:38%;left:50%;transform:translateX(-50%);pointer-events:none;z-index:300;text-align:center;}
+.flash-line{font-size:26px;font-weight:900;color:#ffcc00;text-shadow:0 0 10px #ff6600,0 2px 4px #000;animation:flashFade 2.5s forwards;margin-bottom:4px;}
+@keyframes flashFade{0%{opacity:0;transform:scale(.7)}15%{opacity:1;transform:scale(1.08)}80%{opacity:1}100%{opacity:0;transform:translateY(-18px)}}
+/* Earn money text */
+.earn-float{position:fixed;font-size:18px;font-weight:900;color:#00ff88;text-shadow:0 0 6px #00cc55;pointer-events:none;z-index:300;animation:earnAnim 1.6s forwards;}
+@keyframes earnAnim{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-60px)}}
 </style>
 </head>
 <body>
@@ -124,49 +141,57 @@ canvas{display:block;position:fixed;top:0;left:0;}
   <h1 style="font-size:40px;">🏠 חדר</h1>
   <div style="color:#aaa;font-size:14px;margin-bottom:4px;">קוד החדר:</div>
   <div class="room-code" id="displayCode">------</div>
-  <div id="adminControls" style="display:none;margin:10px 0;">
-    <div style="margin-bottom:8px;color:#aaa;font-size:13px;">מוד משחק:</div>
-    <div class="modes-grid" id="modeCards">
-      <div class="mode-card sel" data-mode="ffa" onclick="selectMode('ffa')"><h3>⚔️ כולם על כולם</h3><p>Free For All</p></div>
-      <div class="mode-card" data-mode="coop" onclick="selectMode('coop')"><h3>🤝 קואופ vs AI</h3><p>כולם ביחד</p></div>
-      <div class="mode-card" data-mode="tdm" onclick="selectMode('tdm')"><h3>🔵🔴 קבוצות</h3><p>Team Deathmatch</p></div>
-      <div class="mode-card" data-mode="gun" onclick="selectMode('gun')"><h3>🔫 Gun Game</h3><p>החלפת נשקים</p></div>
+  <div id="lobbyInner">
+    <!-- LEFT COLUMN: admin controls or info panel -->
+    <div id="lobbyLeft">
+      <div id="adminControls" style="display:none;margin:10px 0;">
+        <div style="margin-bottom:8px;color:#aaa;font-size:13px;">מוד משחק:</div>
+        <div class="modes-grid" id="modeCards">
+          <div class="mode-card sel" data-mode="ffa" onclick="selectMode('ffa')"><h3>⚔️ כולם על כולם</h3><p>Free For All</p></div>
+          <div class="mode-card" data-mode="coop" onclick="selectMode('coop')"><h3>🤝 קואופ vs AI</h3><p>כולם ביחד</p></div>
+          <div class="mode-card" data-mode="tdm" onclick="selectMode('tdm')"><h3>🔵🔴 קבוצות</h3><p>Team Deathmatch</p></div>
+          <div class="mode-card" data-mode="gun" onclick="selectMode('gun')"><h3>🔫 Gun Game</h3><p>החלפת נשקים</p></div>
+        </div>
+        <div style="margin-top:10px;color:#aaa;font-size:13px;">זמן משחק (דקות):</div>
+        <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;">
+          <button class="btn sec" style="padding:7px 16px;font-size:13px;" onclick="setTime(5)">5</button>
+          <button class="btn sec" style="padding:7px 16px;font-size:13px;" onclick="setTime(10)">10</button>
+          <button class="btn sec" style="padding:7px 16px;font-size:13px;" onclick="setTime(15)">15</button>
+          <button class="btn sec" style="padding:7px 16px;font-size:13px;" onclick="setTime(20)">20</button>
+        </div>
+        <div style="margin-top:6px;color:#ffcc00;font-size:13px;">זמן נבחר: <span id="selectedTime">10</span> דקות</div>
+        <div style="margin-top:12px;color:#aaa;font-size:13px;">🗺️ בחר מפה:</div>
+        <div style="display:flex;flex-wrap:wrap;margin-top:4px;" id="mapCards">
+          <div class="map-card sel" data-map="default" onclick="selectMap('default')"><h3>🌿 ברירת מחדל</h3><p>שדה פתוח</p></div>
+          <div class="map-card" data-map="desert" onclick="selectMap('desert')"><h3>🏜️ מדבר</h3><p>חם ויבש</p></div>
+          <div class="map-card" data-map="arctic" onclick="selectMap('arctic')"><h3>❄️ ארקטי</h3><p>קר ומושלג</p></div>
+          <div class="map-card" data-map="city" onclick="selectMap('city')"><h3>🏙️ עיר</h3><p>סביבה עירונית</p></div>
+        </div>
+      </div>
+      <!-- non-admin view of admin's choices -->
+      <div id="roomInfoPanel" style="display:none;">
+        <div>🎮 מוד: <span id="infoMode">כולם על כולם</span></div>
+        <div>⏱️ זמן: <span id="infoTime">10</span> דקות</div>
+        <div>🗺️ מפה: <span id="infoMap">🌿 ברירת מחדל</span></div>
+      </div>
     </div>
-    <div style="margin-top:10px;color:#aaa;font-size:13px;">זמן משחק (דקות):</div>
-    <div style="display:flex;gap:8px;margin-top:6px;justify-content:center;">
-      <button class="btn sec" style="padding:7px 16px;font-size:13px;" onclick="setTime(5)">5</button>
-      <button class="btn sec" style="padding:7px 16px;font-size:13px;" onclick="setTime(10)">10</button>
-      <button class="btn sec" style="padding:7px 16px;font-size:13px;" onclick="setTime(15)">15</button>
-      <button class="btn sec" style="padding:7px 16px;font-size:13px;" onclick="setTime(20)">20</button>
-    </div>
-    <div style="margin-top:6px;color:#ffcc00;font-size:13px;">זמן נבחר: <span id="selectedTime">10</span> דקות</div>
-    <div style="margin-top:12px;color:#aaa;font-size:13px;">🗺️ בחר מפה:</div>
-    <div style="display:flex;flex-wrap:wrap;justify-content:center;margin-top:4px;" id="mapCards">
-      <div class="map-card sel" data-map="default" onclick="selectMap('default')"><h3>🌿 ברירת מחדל</h3><p>שדה פתוח</p></div>
-      <div class="map-card" data-map="desert" onclick="selectMap('desert')"><h3>🏜️ מדבר</h3><p>חם ויבש</p></div>
-      <div class="map-card" data-map="arctic" onclick="selectMap('arctic')"><h3>❄️ ארקטי</h3><p>קר ומושלג</p></div>
-      <div class="map-card" data-map="city" onclick="selectMap('city')"><h3>🏙️ עיר</h3><p>סביבה עירונית</p></div>
+    <!-- RIGHT COLUMN: player list + buttons + chat -->
+    <div id="lobbyRight">
+      <div style="color:#aaa;font-size:13px;margin-top:8px;width:100%;text-align:center;">שחקנים בחדר:</div>
+      <div class="player-list" id="playerList" style="width:100%;"></div>
+      <button class="btn" id="startRoomBtn" style="display:none;" onclick="adminStartGame()">▶ התחל משחק</button>
+      <div id="waitingMsg" style="color:#888;font-size:14px;display:none;">ממתין למנהל שיתחיל...</div>
+      <!-- Lobby chat -->
+      <div id="lobbyChatWrap" style="width:100%;">
+        <div id="lobbyMsgs"></div>
+        <div id="lobbyChatRow">
+          <input id="lobbyChatInp" class="inp" style="width:auto;flex:1;font-size:13px;padding:7px 12px;" placeholder="הודעה לחדר..." onkeydown="lobbyChatKey(event)">
+          <button class="btn sec" style="padding:7px 14px;margin:0;" onclick="sendLobbyChat()">📤</button>
+        </div>
+      </div>
+      <button class="btn sec" onclick="leaveRoom()" style="margin-top:6px;">יציאה</button>
     </div>
   </div>
-  <!-- non-admin view of admin's choices -->
-  <div id="roomInfoPanel" style="display:none;">
-    <div>🎮 מוד: <span id="infoMode">כולם על כולם</span></div>
-    <div>⏱️ זמן: <span id="infoTime">10</span> דקות</div>
-    <div>🗺️ מפה: <span id="infoMap">🌿 ברירת מחדל</span></div>
-  </div>
-  <div style="color:#aaa;font-size:13px;margin-top:8px;">שחקנים בחדר:</div>
-  <div class="player-list" id="playerList"></div>
-  <button class="btn" id="startRoomBtn" style="display:none;" onclick="adminStartGame()">▶ התחל משחק</button>
-  <div id="waitingMsg" style="color:#888;font-size:14px;display:none;">ממתין למנהל שיתחיל...</div>
-  <!-- Lobby chat -->
-  <div id="lobbyChatWrap">
-    <div id="lobbyMsgs"></div>
-    <div id="lobbyChatRow">
-      <input id="lobbyChatInp" class="inp" style="width:auto;flex:1;font-size:13px;padding:7px 12px;" placeholder="הודעה לחדר..." onkeydown="lobbyChatKey(event)">
-      <button class="btn sec" style="padding:7px 14px;margin:0;" onclick="sendLobbyChat()">📤</button>
-    </div>
-  </div>
-  <button class="btn sec" onclick="leaveRoom()" style="margin-top:6px;">יציאה</button>
 </div>
 
 <!-- PAUSE SCREEN -->
@@ -175,6 +200,22 @@ canvas{display:block;position:fixed;top:0;left:0;}
   <button class="btn" onclick="resumeGame()">▶ המשך</button>
   <button class="btn sec" onclick="backToMenu()" style="margin-top:8px;">🏠 תפריט ראשי</button>
 </div>
+
+<!-- SHOP OVERLAY -->
+<div id="shopOverlay">
+  <h3 style="color:#ffcc00;text-align:center;margin-bottom:16px;">🛒 חנות נשקים</h3>
+  <div id="shopItems" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"></div>
+  <div style="text-align:center;margin-top:14px;color:#aaa;font-size:12px;">ESC לסגור</div>
+</div>
+
+<!-- ACHIEVEMENT TOAST -->
+<div id="achievToast"></div>
+
+<!-- FLASH MESSAGE OVERLAY -->
+<div id="flashMsgOverlay"></div>
+
+<!-- EARN MONEY CONTAINER -->
+<div id="earnMoneyContainer" style="position:fixed;bottom:60px;left:50%;transform:translateX(-50%);pointer-events:none;z-index:300;"></div>
 
 <!-- GAME OVER SCREEN -->
 <div id="gameOverScreen">
@@ -197,6 +238,8 @@ canvas{display:block;position:fixed;top:0;left:0;}
     <div class="hudChip">❤️ <span id="hpNum">100</span><div id="hpBar"><div id="hpFill" style="width:100%"></div></div></div>
     <div class="hudChip" id="ammoChip">🔫 <span id="ammoNum">30</span>/<span id="reserveNum">90</span></div>
     <div class="hudChip" id="weapNameChip">רובה AR</div>
+    <div class="hudChip" id="moneyChip">💰 <span id="moneyNum">0</span></div>
+    <div class="hudChip" id="grenadeChip">🥚 <span id="grenadeCount">3</span></div>
   </div>
   <div id="weaponHUD"></div>
   <div id="minigunBar" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.7);border-radius:20px;padding:6px 16px;color:#ffcc00;font-size:13px;text-align:center;">
@@ -212,7 +255,7 @@ canvas{display:block;position:fixed;top:0;left:0;}
   <div id="hitFlash"></div>
   <div id="killFeed"></div>
   <div id="scoreboard"><h3>📊 טבלת ניקוד</h3><div id="sbContent"></div></div>
-  <div id="instructions">ESC — פוס (Solo)<br>TAB — ניקוד<br>R — טעינה<br>F — לקחת נשק<br>X — החלף נשק<br>B — בנייה<br>T — צ'אט<br>Shift — ריצה</div>
+  <div id="instructions">ESC — פוס (Solo)<br>TAB — ניקוד<br>R — טעינה<br>F — לקחת נשק<br>X — החלף נשק<br>B — בנייה<br>T — צ'אט<br>Shift — ריצה<br>E — רכב/חנות<br>G — רימון<br>Z — אמוג'י</div>
 </div>
 <div id="chatBox"></div>
 <input id="chatInput" placeholder="💬 הודעה... (Enter לשלוח, Esc לסגור)">
@@ -228,21 +271,22 @@ canvas{display:block;position:fixed;top:0;left:0;}
 <script>
 // ─── WEAPONS CONFIG ─────────────────────────────────────────────────────────
 const WEAPONS = {
-  pistol:  {name:'אקדח',        ammo:12,  reserve:60,  damage:25,  fireRate:400,  auto:false, zoom:2.0, color:0x888888},
-  rifle:   {name:'רובה AR',     ammo:30,  reserve:120, damage:18,  fireRate:120,  auto:true,  zoom:1.8, color:0x2d6b2d},
-  shotgun: {name:'שוטגאן',     ammo:8,   reserve:32,  damage:14,  fireRate:700,  auto:false, zoom:1.4, pellets:6, color:0x8B4513},
-  sniper:  {name:'סנייפר',     ammo:5,   reserve:20,  damage:95,  fireRate:1400, auto:false, zoom:5.0, scope:true, color:0x1a1a6a},
-  smg:     {name:'SMG',         ammo:40,  reserve:200, damage:11,  fireRate:75,   auto:true,  zoom:1.5, color:0x444444},
-  lmg:     {name:'מקלע',        ammo:100, reserve:300, damage:15,  fireRate:85,   auto:true,  zoom:1.6, color:0x777733},
-  minigun: {name:'מיניגאן',    ammo:200, reserve:400, damage:9,   fireRate:35,   auto:true,  zoom:1.2, color:0x445566, warmup:60},
-  rocket:  {name:'תותח רקטות', ammo:4,   reserve:16,  damage:120, fireRate:1500, auto:false, zoom:1.5, splash:10, color:0xcc4400, projectile:true},
-  plasma:  {name:'רובה פלזמה', ammo:25,  reserve:75,  damage:35,  fireRate:300,  auto:true,  zoom:2.0, color:0x0066ff, projectile:true},
-  grenade: {name:'מטול רימונים',ammo:5,   reserve:20,  damage:90,  fireRate:1200, auto:false, zoom:1.2, splash:7, color:0x446622, projectile:true, arc:true, arcForce:14}
+  pistol:  {name:'אקדח',        ammo:12,  reserve:60,  damage:30,  fireRate:350,  auto:false, zoom:2.0, color:0x888888},
+  rifle:   {name:'רובה AR',     ammo:30,  reserve:120, damage:22,  fireRate:100,  auto:true,  zoom:1.8, color:0x2d6b2d},
+  shotgun: {name:'שוטגאן',     ammo:8,   reserve:32,  damage:18,  fireRate:650,  auto:false, zoom:1.4, pellets:8, color:0x8B4513},
+  sniper:  {name:'סנייפר',     ammo:5,   reserve:20,  damage:110, fireRate:1300, auto:false, zoom:5.0, scope:true, color:0x1a1a6a},
+  smg:     {name:'SMG',         ammo:40,  reserve:200, damage:13,  fireRate:65,   auto:true,  zoom:1.5, color:0x444444},
+  lmg:     {name:'מקלע',        ammo:100, reserve:300, damage:18,  fireRate:75,   auto:true,  zoom:1.6, color:0x777733},
+  minigun: {name:'מיניגאן',    ammo:200, reserve:400, damage:12,  fireRate:30,   auto:true,  zoom:1.2, color:0x445566, warmup:60},
+  rocket:  {name:'תותח רקטות', ammo:4,   reserve:16,  damage:140, fireRate:1300, auto:false, zoom:1.5, splash:12, color:0xcc4400, projectile:true},
+  plasma:  {name:'רובה פלזמה', ammo:25,  reserve:75,  damage:40,  fireRate:280,  auto:true,  zoom:2.0, color:0x0066ff, projectile:true},
+  grenade: {name:'מטול רימונים',ammo:5,   reserve:20,  damage:100, fireRate:1200, auto:false, zoom:1.2, splash:9, color:0x446622, projectile:true, arc:true, arcForce:16},
+  knife:   {name:'סכין',        ammo:999, reserve:999, damage:150, fireRate:500,  auto:false, zoom:1.0, color:0xcccccc, melee:true, range:2.5}
 };
 const WK = Object.keys(WEAPONS);
 
 // ─── WEAPON RARITY ───────────────────────────────────────────────────────────
-const RARITY={pistol:'common',rifle:'common',smg:'common',shotgun:'rare',lmg:'rare',sniper:'rare',minigun:'epic',rocket:'epic',plasma:'epic',grenade:'epic'};
+const RARITY={pistol:'common',rifle:'common',smg:'common',shotgun:'rare',lmg:'rare',sniper:'rare',minigun:'epic',rocket:'epic',plasma:'epic',grenade:'epic',knife:'rare'};
 const RARITY_WEIGHT={common:50,rare:30,epic:10};
 const RARITY_LABEL={common:'⬜ נפוץ',rare:'🟦 נדיר',epic:'🟪 אגדי'};
 function randomWeapon(){
@@ -341,6 +385,38 @@ const playerVel=new THREE.Vector3();
 const keys={};
 let wood=50, stone=30;
 let buildMode=false, buildPiece=0;
+// ─── NEW STATE ────────────────────────────────────────────────────────────────
+let money=0;
+let killStreak=0;
+let speedBoostTimer=0;
+let handGrenades=3;
+let handGrenadeRechargeTimer=0;
+const handGrenadeProjectiles=[];
+let gunGameIdx=0;
+const GUN_GAME_SEQ=['pistol','smg','rifle','shotgun','lmg','sniper','plasma','rocket','grenade','minigun'];
+// Car system
+const cars=[];
+let inCar=false, currentCar=null;
+let nearCar=null, nearShop=null;
+// Shop system
+const shopMeshes=[];
+let shopOpen=false;
+// Achievements
+const ACHIEV={
+  firstBlood:{name:'🩸 ראשון בדם',desc:'הרג ראשון במשחק'},
+  streak5:   {name:'🔥 ×5 ברצף',  desc:'5 הריגות ברצף'},
+  sniper3:   {name:'🎯 סנייפר מלך',desc:'3 הריגות עם סנייפר'},
+  driver:    {name:'🚗 נהג מהיר', desc:'נסע עם מכונית'},
+  rich:      {name:'💰 עשיר',     desc:'צבר $1000'},
+  builder:   {name:'🏗️ בנאי',    desc:'בנה 10 מבנים'},
+  epic:      {name:'🟪 אגדי!',   desc:'השג נשק אגדי מתיבה'},
+};
+let achievementsUnlocked={};
+let sniperKillCount=0, buildCount=0;
+let firstBloodDone=false;
+// Emote
+const EMOTES=['👋 שלום!','😂 haha!','💀 אתה מת!','🎉 יאה!','🤝 ביחד!'];
+let emoteIdx=0;
 
 // ─── SCENE SETUP ─────────────────────────────────────────────────────────────
 const scene=new THREE.Scene();
@@ -454,6 +530,16 @@ function buildWeaponModel(type){
     tube.rotation.x=Math.PI/2; tube.position.set(0,.01,-.38); g.add(tube);
     const mg=obj(new THREE.BoxGeometry(.05,.12,.07),mat(0x333333));
     mg.position.set(0,-.09,-.02); g.add(mg);
+  } else if(type==='knife'){
+    // Blade: thin elongated box
+    const blade=obj(new THREE.BoxGeometry(.015,.04,.42),mat(c));
+    blade.position.set(0,.01,-.28); g.add(blade);
+    // Handle
+    const handle=obj(new THREE.BoxGeometry(.03,.06,.14),mat(0x553311));
+    handle.position.set(0,0,.08); g.add(handle);
+    // Guard
+    const guard=obj(new THREE.BoxGeometry(.09,.025,.025),mat(0x555555));
+    guard.position.set(0,.01,-.01); g.add(guard);
   }
   g.position.set(.22,-.22,-.45);
   g.visible=false;
@@ -559,6 +645,8 @@ function openLootBox(box){
   pickMesh.position.set(pos.x,.4,pos.z); scene.add(pickMesh);
   // label
   spawnText(pos,`🎁 ${RARITY_LABEL[rar]} ${WEAPONS[type].name}`,'#ffcc00');
+  earnMoney(25);
+  if(rar==='epic') unlockAchievement('epic');
   // respawn crate after 30s
   setTimeout(()=>{const a=Math.random()*Math.PI*2,d=8+Math.random()*70;mkLootBox(Math.cos(a)*d,Math.sin(a)*d);},30000);
   const baseY=.4;
@@ -614,7 +702,29 @@ function checkPickupNearby(){
   }
   const el=document.getElementById('pickupPrompt');
   currentNearPickup=near?(nearType==='health'?{...near,isHealth:true}:near):null;
-  if(near){
+  // Check car proximity
+  nearCar=null;
+  if(!inCar){
+    for(const car of cars){
+      if(!car.occupied&&car.pos.distanceTo(playerPos)<4){nearCar=car;break;}
+    }
+  }
+  // Check shop proximity
+  nearShop=null;
+  for(const s of shopMeshes){
+    if(s.pos.distanceTo(playerPos)<3.5){nearShop=s;break;}
+  }
+  // Determine prompt priority: shop > car > pickup
+  if(nearShop){
+    el.style.display='block';
+    el.textContent='🛒 E לחנות';
+  } else if(nearCar){
+    el.style.display='block';
+    el.textContent='🚗 E להיכנס למכונית';
+  } else if(inCar){
+    el.style.display='block';
+    el.textContent='E לצאת מהמכונית';
+  } else if(near){
     el.style.display='block';
     el.textContent=nearType==='health'?'לחץ F לרפא ❤️ +50':`לחץ F לקחת ${WEAPONS[near.type]?.name||''}`;
   } else el.style.display='none';
@@ -677,6 +787,7 @@ function placeBuild(){
   m.position.copy(buildGhost.position); m.rotation.y=buildGhost.rotation.y;
   m.castShadow=true; m.receiveShadow=true; m.userData={isStruct:true,hp:150};
   scene.add(m); structures.push(m); updateHUD();
+  buildCount++; if(buildCount>=10) unlockAchievement('builder');
 }
 function destroyLookedAt(){
   if(!buildMode) return;
@@ -753,6 +864,14 @@ function killEnemy(e){
   if(playerWeapons[currentWeaponKey]) playerWeapons[currentWeaponKey].ammo=Math.min(WEAPONS[currentWeaponKey].ammo,playerWeapons[currentWeaponKey].ammo+Math.floor(ammoAdd/3));
   updateHUD();
   addKillFeed(playerName,'AI bot');
+  // Money & streak
+  earnMoney(100);
+  killStreak++; checkKillStreak();
+  // Achievements
+  if(!firstBloodDone){firstBloodDone=true;unlockAchievement('firstBlood');}
+  if(currentWeaponKey==='sniper'){sniperKillCount++;if(sniperKillCount>=3)unlockAchievement('sniper3');}
+  // Gun game
+  gunGameOnKill();
   setTimeout(()=>{if(enemies.length<10)mkEnemy((Math.random()-.5)*160,(Math.random()-.5)*160);},4000);
 }
 function updateEnemies(dt){
@@ -1061,7 +1180,26 @@ function shoot(){
   // Minigun requires warm-up
   if(currentWeaponKey==='minigun'&&!minigunReady) return;
   const w=playerWeapons[currentWeaponKey];
-  if(!w||w.ammo<=0){if(w&&w.reserve>0)reload();return;}
+  if(!w) return;
+  // Melee (knife)
+  if(WEAPONS[currentWeaponKey].melee){
+    canShoot=false;
+    setTimeout(()=>canShoot=true,WEAPONS[currentWeaponKey].fireRate);
+    weaponGroups[currentWeaponKey].position.z=-0.25;
+    setTimeout(()=>weaponGroups[currentWeaponKey].position.z=-0.45,120);
+    muzzle();
+    const range=WEAPONS[currentWeaponKey].range||2.5;
+    for(let j=enemies.length-1;j>=0;j--){
+      if(enemies[j].position.distanceTo(playerPos)<range){
+        const dmg=WEAPONS[currentWeaponKey].damage;
+        enemies[j].userData.hp-=dmg; updateEnemyHP(enemies[j]);
+        spawnText(enemies[j].position.clone().add(new THREE.Vector3(0,2,0)),`-${dmg}`,'#ff4444');
+        if(enemies[j].userData.hp<=0) killEnemy(enemies[j]);
+      }
+    }
+    return;
+  }
+  if(w.ammo<=0){if(w.reserve>0)reload();return;}
   canShoot=false;
   const fr=WEAPONS[currentWeaponKey].fireRate;
   setTimeout(()=>canShoot=true,fr);
@@ -1170,6 +1308,7 @@ function reload(){
 const GRAVITY=-22,JUMP=9,SPD=10,SPD_SPRINT=17;
 let headBobT=0;
 function updatePlayer(dt){
+  if(inCar) return; // car physics handled in updateCars
   const fwd=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
   const rgt=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
   const move=new THREE.Vector3();
@@ -1178,7 +1317,8 @@ function updatePlayer(dt){
   if(keys['KeyD']||keys['ArrowRight']) move.add(rgt);
   if(keys['KeyA']||keys['ArrowLeft']) move.sub(rgt);
   if(move.length()>0) move.normalize();
-  const spd=(keys['ShiftLeft']||keys['ShiftRight'])&&!isZoomed?SPD_SPRINT:SPD;
+  const spdBoost=speedBoostTimer>0?1.5:1.0;
+  const spd=((keys['ShiftLeft']||keys['ShiftRight'])&&!isZoomed?SPD_SPRINT:SPD)*spdBoost;
   playerVel.x=move.x*spd; playerVel.z=move.z*spd;
   playerVel.y+=GRAVITY*dt;
   playerPos.addScaledVector(playerVel,dt);
@@ -1283,6 +1423,8 @@ function updateHUD(){
     document.getElementById('reserveNum').textContent=w.reserve;
     document.getElementById('weapNameChip').textContent=WEAPONS[currentWeaponKey].name;
   }
+  document.getElementById('moneyNum').textContent=money;
+  document.getElementById('grenadeCount').textContent=handGrenades;
   // weapon slots right HUD
   const wh=document.getElementById('weaponHUD');
   wh.innerHTML='';
@@ -1296,11 +1438,15 @@ function updateHUD(){
 
 // ─── DEATH / RESPAWN ─────────────────────────────────────────────────────────
 function handleDeath(){
+  killStreak=0;
+  // Exit car if in one
+  if(inCar&&currentCar){inCar=false;currentCar.occupied=false;currentCar=null;}
   if(isSolo){
     // solo = game over
     showGameOver(null);
   } else {
     // room mode: countdown then respawn
+    gunGameOnDeath();
     isRespawning=true; hp=0; updateHUD();
     let count=3;
     const ro=document.getElementById('respawnOverlay');
@@ -1310,10 +1456,13 @@ function handleDeath(){
       count--;
       if(count<=0){
         clearInterval(civ); ro.style.display='none'; isRespawning=false;
-        playerWeapons={};
-        const t=WK[Math.floor(Math.random()*WK.length)];
-        playerWeapons[t]={ammo:WEAPONS[t].ammo,reserve:WEAPONS[t].reserve};
-        currentWeaponKey=t; hp=100;
+        if(roomGameMode!=='gun'){
+          playerWeapons={};
+          const t=WK[Math.floor(Math.random()*WK.length)];
+          playerWeapons[t]={ammo:WEAPONS[t].ammo,reserve:WEAPONS[t].reserve};
+          currentWeaponKey=t;
+        }
+        hp=100;
         const a=Math.random()*Math.PI*2,d=20+Math.random()*30;
         playerPos.set(Math.cos(a)*d,1.8,Math.sin(a)*d);
         updateWeaponModel(); updateHUD();
@@ -1374,6 +1523,16 @@ function cleanupGame(){
   structures.forEach(s=>scene.remove(s)); structures.length=0;
   lootBoxes.forEach(b=>{if(!b.isOpen)scene.remove(b.mesh);}); lootBoxes.length=0;
   mapObjects.forEach(o=>scene.remove(o)); mapObjects.length=0;
+  // Cars
+  cars.forEach(c=>scene.remove(c.mesh)); cars.length=0;
+  inCar=false; currentCar=null;
+  // Hand grenades
+  handGrenadeProjectiles.forEach(g=>scene.remove(g.mesh)); handGrenadeProjectiles.length=0;
+  // Shops
+  shopMeshes.forEach(s=>{scene.remove(s.mesh);scene.remove(s.light);}); shopMeshes.length=0;
+  // Roads
+  roadObjects.forEach(o=>scene.remove(o)); roadObjects.length=0;
+  money=0;
   // Restore tree visibility
   envObjects.forEach(o=>{if(o.userData.isTree)o.visible=true;o.traverse(c=>{if(c.isMesh&&c.geometry.type==='ConeGeometry')c.material.color.setHex(0x2d7a1e);});});
   clearInterval(gameTimerIv); clearInterval(syncIv);
@@ -1435,13 +1594,24 @@ document.addEventListener('keydown',e=>{
   if(!gameStarted) return;
   if(chatOpen) return;
   if(e.code==='KeyT'){openChatInput();return;}
-  if(e.code==='Escape'&&isSolo){if(gamePaused)resumeGame();else pauseGame();return;}
+  if(e.code==='Escape'){
+    if(shopOpen){closeShop();return;}
+    if(isSolo){if(gamePaused)resumeGame();else pauseGame();return;}
+  }
   if(gamePaused) return;
-  if(e.code==='Space'&&onGround){playerVel.y=JUMP;onGround=false;}
+  if(e.code==='Space'&&onGround&&!inCar){playerVel.y=JUMP;onGround=false;}
+  if(e.code==='Space'&&inCar){enterExitCar();return;}
   if(e.code==='KeyB') toggleBuild();
   if(e.code==='KeyF'){if(buildMode)destroyLookedAt();else doPickup();}
   if(e.code==='KeyX') switchWeapon();
   if(e.code==='KeyR') reload();
+  if(e.code==='KeyE'){
+    // Priority: shop first, then car
+    if(nearShop&&!shopOpen){openShop();return;}
+    if(nearCar||inCar){enterExitCar();return;}
+  }
+  if(e.code==='KeyG') throwHandGrenade();
+  if(e.code==='KeyZ') doEmote();
   if(e.code==='Tab'){e.preventDefault();document.getElementById('scoreboard').style.display='block';}
   if(e.code==='Digit1'&&WK[0]) setWeapon(WK[0]);
   if(e.code==='Digit2'&&WK[1]) setWeapon(WK[1]);
@@ -1609,7 +1779,11 @@ function connectSocket(){
         spawnText(roomBotMeshes[botId].position.clone().add(new THREE.Vector3(0,2,0)),'💀','#ff4444');
         removeBotMesh(botId);
       }
-      if(killerId===socket?.id){kills++;document.getElementById('killCount').textContent=kills;}
+      if(killerId===socket?.id){
+        kills++;document.getElementById('killCount').textContent=kills;
+        earnMoney(100); killStreak++; checkKillStreak();
+        gunGameOnKill();
+      }
       const kName=scores?.[killerId]?.name||'?';
       addKillFeed(kName,'AI bot');
     });
@@ -1628,7 +1802,13 @@ function connectSocket(){
       if(hp<=0&&!isRespawning) handleDeath();
     });
     socket.on('playerDied',({deadId,killerId,scores})=>{
-      if(killerId===socket?.id){kills++;document.getElementById('killCount').textContent=kills;}
+      if(killerId===socket?.id){
+        kills++;document.getElementById('killCount').textContent=kills;
+        earnMoney(200); killStreak++; checkKillStreak();
+        if(!firstBloodDone){firstBloodDone=true;unlockAchievement('firstBlood');}
+        if(currentWeaponKey==='sniper'){sniperKillCount++;if(sniperKillCount>=3)unlockAchievement('sniper3');}
+        gunGameOnKill();
+      }
       const kName=scores?.[killerId]?.name||'?', vName=scores?.[deadId]?.name||'?';
       addKillFeed(kName,vName);
       if(deadId===socket?.id) handleDeath();
@@ -1638,6 +1818,10 @@ function connectSocket(){
       showGameOver(sorted[0]?.[1]?.name||'?');
     });
     socket.on('kicked',()=>{alert('הוסרת מהחדר על ידי המנהל');location.reload();});
+    socket.on('emote',({id,emote})=>{
+      const g=remotePlayerMeshes[id];
+      if(g) spawnText(g.position.clone().add(new THREE.Vector3(0,3,0)),emote,'#ffcc00');
+    });
   } catch(err){console.warn('Socket error',err);socket=null;}
 }
 
@@ -1843,6 +2027,319 @@ function confirmName(){
   }
 }
 
+// ─── MONEY SYSTEM ────────────────────────────────────────────────────────────
+function earnMoney(amount){
+  if(!gameStarted) return;
+  money+=amount;
+  document.getElementById('moneyNum').textContent=money;
+  // Show floating earn text
+  const el=document.createElement('div');
+  el.className='earn-float';
+  el.textContent='+$'+amount;
+  el.style.left=(45+Math.random()*10)+'%';
+  el.style.bottom='80px';
+  document.getElementById('earnMoneyContainer').appendChild(el);
+  setTimeout(()=>el.remove(),1700);
+  // Rich achievement
+  if(money>=1000&&!achievementsUnlocked['rich']){unlockAchievement('rich');}
+}
+
+// ─── ACHIEVEMENT SYSTEM ──────────────────────────────────────────────────────
+function unlockAchievement(key){
+  if(achievementsUnlocked[key]) return;
+  achievementsUnlocked[key]=true;
+  const a=ACHIEV[key]; if(!a) return;
+  const toast=document.getElementById('achievToast');
+  const el=document.createElement('div');
+  el.className='achiev-item';
+  el.innerHTML=`<b>${a.name}</b><br><span style="font-size:11px;color:#aaa">${a.desc}</span>`;
+  toast.appendChild(el);
+  setTimeout(()=>{el.style.transition='opacity .5s';el.style.opacity='0';setTimeout(()=>el.remove(),500);},3000);
+}
+
+// ─── FLASH HUD MESSAGE ────────────────────────────────────────────────────────
+function flashHUD(msg){
+  const el=document.createElement('div');
+  el.className='flash-line';
+  el.textContent=msg;
+  document.getElementById('flashMsgOverlay').appendChild(el);
+  setTimeout(()=>el.remove(),2600);
+}
+
+// ─── KILLSTREAK SYSTEM ───────────────────────────────────────────────────────
+function checkKillStreak(){
+  if(killStreak===3){hp=Math.min(100,hp+50);updateHUD();flashHUD('🔥 ×3 KILLSTREAK! +50HP');}
+  if(killStreak===5){speedBoostTimer=8;flashHUD('⚡ ×5 SPEED BOOST!');unlockAchievement('streak5');}
+  if(killStreak===7){
+    playerWeapons['minigun']={ammo:200,reserve:400};
+    updateWeaponModel();updateHUD();
+    flashHUD('🔥 ×7 MINIGUN!');
+  }
+  if(killStreak===10){
+    flashHUD('💥 ×10 AIRSTRIKE!');
+    // Spawn 8 rockets from sky over enemy area
+    for(let i=0;i<8;i++){
+      setTimeout(()=>{
+        const ex=new THREE.Vector3((Math.random()-.5)*120,0,(Math.random()-.5)*120);
+        explosionFX(ex.clone().add(new THREE.Vector3(0,1,0)),12,120,false);
+      },i*300);
+    }
+  }
+  // killstreak money bonus
+  if(killStreak>=2) earnMoney(50*(killStreak-1));
+}
+
+// ─── GUN GAME MODE ───────────────────────────────────────────────────────────
+function gunGameOnKill(){
+  if(roomGameMode!=='gun') return;
+  gunGameIdx=Math.min(GUN_GAME_SEQ.length-1,gunGameIdx+1);
+  const wk=GUN_GAME_SEQ[gunGameIdx];
+  playerWeapons={};
+  playerWeapons[wk]={ammo:WEAPONS[wk].ammo,reserve:WEAPONS[wk].reserve};
+  currentWeaponKey=wk; updateWeaponModel(); updateHUD();
+  flashHUD('🔫 NEXT: '+WEAPONS[wk].name);
+  if(gunGameIdx===GUN_GAME_SEQ.length-1) setTimeout(()=>endGame(),1500);
+}
+function gunGameOnDeath(){
+  if(roomGameMode!=='gun') return;
+  gunGameIdx=Math.max(0,gunGameIdx-1);
+  const wk=GUN_GAME_SEQ[gunGameIdx];
+  playerWeapons={};
+  playerWeapons[wk]={ammo:WEAPONS[wk].ammo,reserve:WEAPONS[wk].reserve};
+  currentWeaponKey=wk; updateWeaponModel(); updateHUD();
+}
+
+// ─── HAND GRENADES ───────────────────────────────────────────────────────────
+function throwHandGrenade(){
+  if(handGrenades<=0||!gameStarted||gamePaused||isRespawning) return;
+  handGrenades--; document.getElementById('grenadeCount').textContent=handGrenades;
+  const dir=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion).normalize();
+  const pos=camera.position.clone().add(dir.clone().multiplyScalar(1.5));
+  const mesh=new THREE.Mesh(new THREE.SphereGeometry(.18,6,6),new THREE.MeshLambertMaterial({color:0x446622}));
+  mesh.position.copy(pos); scene.add(mesh);
+  handGrenadeProjectiles.push({mesh,dir:dir.clone(),speed:18,arcVelY:16,life:3.5,fuse:3.5});
+  // Weapon shake animation
+  if(weaponGroups[currentWeaponKey]){
+    weaponGroups[currentWeaponKey].position.y=-0.32;
+    setTimeout(()=>weaponGroups[currentWeaponKey].position.y=-0.22,120);
+  }
+}
+function updateHandGrenades(dt){
+  // Recharge
+  if(handGrenades<3){
+    handGrenadeRechargeTimer+=dt;
+    if(handGrenadeRechargeTimer>=20){handGrenades++;handGrenadeRechargeTimer=0;document.getElementById('grenadeCount').textContent=handGrenades;}
+  }
+  for(let i=handGrenadeProjectiles.length-1;i>=0;i--){
+    const g=handGrenadeProjectiles[i];
+    g.fuse-=dt; g.life-=dt;
+    g.arcVelY-=22*dt;
+    g.mesh.position.x+=g.dir.x*g.speed*dt;
+    g.mesh.position.y+=g.dir.y*g.speed*dt+g.arcVelY*dt;
+    g.mesh.position.z+=g.dir.z*g.speed*dt;
+    g.mesh.rotation.x+=dt*5;
+    if(g.fuse<=0||g.mesh.position.y<0.2){
+      explosionFX(g.mesh.position.clone(),8,90,false);
+      scene.remove(g.mesh); handGrenadeProjectiles.splice(i,1);
+    }
+  }
+}
+
+// ─── EMOTES ──────────────────────────────────────────────────────────────────
+function doEmote(){
+  const emote=EMOTES[emoteIdx%EMOTES.length]; emoteIdx++;
+  spawnText(playerPos.clone().add(new THREE.Vector3(0,3,0)),emote,'#ffcc00');
+  socket?.emit('emote',{emote});
+}
+
+// ─── ROADS ───────────────────────────────────────────────────────────────────
+const roadObjects=[];
+function addRoads(){
+  roadObjects.forEach(o=>scene.remove(o)); roadObjects.length=0;
+  const roadMat=new THREE.MeshLambertMaterial({color:0x252525});
+  const sideMat=new THREE.MeshLambertMaterial({color:0x777777});
+  const lineMat=new THREE.MeshLambertMaterial({color:0xffcc00});
+  // N-S roads at x = -70, 0, 70
+  [-70,0,70].forEach(x=>{
+    const r=new THREE.Mesh(new THREE.PlaneGeometry(9,240),roadMat.clone());
+    r.rotation.x=-Math.PI/2; r.position.set(x,0.02,0); r.receiveShadow=true;
+    scene.add(r); roadObjects.push(r);
+    // Sidewalks
+    [-1,1].forEach(side=>{
+      const sw=new THREE.Mesh(new THREE.PlaneGeometry(1.5,240),sideMat.clone());
+      sw.rotation.x=-Math.PI/2; sw.position.set(x+side*5.25,0.015,0); sw.receiveShadow=true;
+      scene.add(sw); roadObjects.push(sw);
+    });
+    // Center dashes
+    for(let z=-120;z<=120;z+=10){
+      const dash=new THREE.Mesh(new THREE.PlaneGeometry(0.25,5),lineMat.clone());
+      dash.rotation.x=-Math.PI/2; dash.position.set(x,0.025,z); scene.add(dash); roadObjects.push(dash);
+    }
+  });
+  // E-W roads at z = -70, 0, 70
+  [-70,0,70].forEach(z=>{
+    const r=new THREE.Mesh(new THREE.PlaneGeometry(240,9),roadMat.clone());
+    r.rotation.x=-Math.PI/2; r.position.set(0,0.02,z); r.receiveShadow=true;
+    scene.add(r); roadObjects.push(r);
+    // Sidewalks
+    [-1,1].forEach(side=>{
+      const sw=new THREE.Mesh(new THREE.PlaneGeometry(240,1.5),sideMat.clone());
+      sw.rotation.x=-Math.PI/2; sw.position.set(0,0.015,z+side*5.25); sw.receiveShadow=true;
+      scene.add(sw); roadObjects.push(sw);
+    });
+    // Center dashes
+    for(let x=-120;x<=120;x+=10){
+      const dash=new THREE.Mesh(new THREE.PlaneGeometry(5,0.25),lineMat.clone());
+      dash.rotation.x=-Math.PI/2; dash.position.set(x,0.025,z); scene.add(dash); roadObjects.push(dash);
+    }
+  });
+}
+
+// ─── CAR SYSTEM ──────────────────────────────────────────────────────────────
+function mkCar(x,z,color){
+  const g=new THREE.Group();
+  const bodyMat=new THREE.MeshLambertMaterial({color});
+  const darkMat=new THREE.MeshLambertMaterial({color:0x222222});
+  const glassMat=new THREE.MeshLambertMaterial({color:0x88ccff,transparent:true,opacity:0.45});
+  // Body
+  const body=new THREE.Mesh(new THREE.BoxGeometry(2.2,0.65,4.2),bodyMat);
+  body.position.y=0.8; body.castShadow=true; g.add(body);
+  // Roof
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(1.7,0.55,2.2),bodyMat);
+  roof.position.y=1.5; g.add(roof);
+  // Windshield
+  const wind=new THREE.Mesh(new THREE.PlaneGeometry(1.6,0.5),glassMat);
+  wind.position.set(0,1.38,-0.9); wind.rotation.x=-0.3; g.add(wind);
+  // Headlights
+  [-0.7,0.7].forEach(xo=>{
+    const hl=new THREE.Mesh(new THREE.SphereGeometry(0.12,6,6),new THREE.MeshBasicMaterial({color:0xffffcc}));
+    hl.position.set(xo,0.8,-2.15); g.add(hl);
+  });
+  // 4 wheels
+  const wheelGeo=new THREE.CylinderGeometry(0.38,0.38,0.28,10);
+  const wheelMat=new THREE.MeshLambertMaterial({color:0x111111});
+  [[-0.95,0.38,-1.4],[0.95,0.38,-1.4],[-0.95,0.38,1.4],[0.95,0.38,1.4]].forEach(([wx,wy,wz])=>{
+    const wh=new THREE.Mesh(wheelGeo,wheelMat);
+    wh.rotation.z=Math.PI/2; wh.position.set(wx,wy,wz); wh.castShadow=true; g.add(wh);
+  });
+  g.position.set(x,0,z);
+  scene.add(g);
+  const car={mesh:g,pos:new THREE.Vector3(x,0,z),rot:0,vel:0,occupied:false,id:cars.length};
+  cars.push(car); return car;
+}
+
+function updateCars(dt){
+  cars.forEach(car=>{
+    if(car.occupied&&car===currentCar&&inCar){
+      // Steering: use yaw from mouse
+      car.rot=yaw;
+      // Acceleration
+      const accel=12, brake=18, friction=8, maxFwd=32, maxRev=-10;
+      if(keys['KeyW']||keys['ArrowUp']){
+        car.vel=Math.min(maxFwd,car.vel+accel*dt);
+      } else if(keys['KeyS']||keys['ArrowDown']){
+        car.vel=Math.max(maxRev,car.vel-brake*dt);
+      } else {
+        // friction
+        if(car.vel>0) car.vel=Math.max(0,car.vel-friction*dt);
+        else if(car.vel<0) car.vel=Math.min(0,car.vel+friction*dt);
+      }
+      // Move car
+      car.pos.x+=Math.sin(-car.rot)*car.vel*dt;
+      car.pos.z+=Math.cos(-car.rot)*car.vel*dt;
+      car.mesh.position.copy(car.pos);
+      car.mesh.rotation.y=car.rot;
+      // Sync player to car
+      playerPos.x=car.pos.x;
+      playerPos.z=car.pos.z;
+      playerPos.y=car.pos.y+1.8;
+      // Update camera
+      camera.position.copy(playerPos);
+      camera.rotation.order='YXZ'; camera.rotation.y=yaw; camera.rotation.x=pitch;
+    }
+  });
+}
+
+function enterExitCar(){
+  if(inCar&&currentCar){
+    // Exit
+    inCar=false; currentCar.occupied=false;
+    playerPos.set(currentCar.pos.x+2,1.8,currentCar.pos.z+2);
+    currentCar=null;
+    flashHUD('יצאת מהמכונית');
+  } else if(nearCar){
+    // Enter
+    inCar=true; nearCar.occupied=true; currentCar=nearCar;
+    unlockAchievement('driver');
+    flashHUD('🚗 נכנסת למכונית! W/S לנהיגה');
+  }
+}
+
+// ─── SHOP SYSTEM ─────────────────────────────────────────────────────────────
+function mkShop(x,z){
+  const mat=new THREE.MeshLambertMaterial({color:0xff8800,emissive:0xffaa00,emissiveIntensity:0.4});
+  const mesh=new THREE.Mesh(new THREE.BoxGeometry(1.5,2,1.5),mat);
+  mesh.position.set(x,1,z); mesh.castShadow=true; scene.add(mesh);
+  // Glow light
+  const light=new THREE.PointLight(0xffaa00,1.5,8);
+  light.position.set(x,2.5,z); scene.add(light);
+  shopMeshes.push({mesh,light,pos:new THREE.Vector3(x,1,z)});
+}
+
+const SHOP_ITEMS=[
+  {key:'pistol',label:'אקדח',price:150},
+  {key:'rifle',label:'רובה AR',price:350},
+  {key:'shotgun',label:'שוטגאן',price:400},
+  {key:'sniper',label:'סנייפר',price:700},
+  {key:'smg',label:'SMG',price:250},
+  {key:'lmg',label:'מקלע',price:500},
+  {key:'rocket',label:'רקטות',price:1200},
+  {key:'plasma',label:'פלזמה',price:900},
+  {key:'ammo',label:'תחמושת +מלאה',price:200},
+  {key:'health',label:'HP +75',price:300},
+];
+function openShop(){
+  shopOpen=true;
+  document.exitPointerLock();
+  const el=document.getElementById('shopOverlay');
+  el.style.display='block';
+  const items=document.getElementById('shopItems');
+  items.innerHTML='';
+  SHOP_ITEMS.forEach(item=>{
+    const btn=document.createElement('button');
+    btn.className='btn sec';
+    btn.style.cssText='font-size:13px;padding:8px 10px;margin:0;border-radius:8px;';
+    btn.innerHTML=`${item.label}<br><span style="color:#ffcc00">$${item.price}</span>`;
+    btn.onclick=()=>buyShopItem(item);
+    items.appendChild(btn);
+  });
+}
+function closeShop(){
+  shopOpen=false;
+  document.getElementById('shopOverlay').style.display='none';
+  if(gameStarted) renderer.domElement.requestPointerLock();
+}
+function buyShopItem(item){
+  if(money<item.price){flashHUD('אין מספיק כסף!');return;}
+  money-=item.price;
+  document.getElementById('moneyNum').textContent=money;
+  if(item.key==='ammo'){
+    if(playerWeapons[currentWeaponKey]) playerWeapons[currentWeaponKey].reserve=WEAPONS[currentWeaponKey].reserve;
+    flashHUD('תחמושת נטענה!');
+  } else if(item.key==='health'){
+    hp=Math.min(100,hp+75); updateHUD(); flashHUD('❤️ +75 HP');
+  } else {
+    if(playerWeapons[item.key]){
+      playerWeapons[item.key].reserve=WEAPONS[item.key].reserve;
+    } else {
+      playerWeapons[item.key]={ammo:WEAPONS[item.key].ammo,reserve:WEAPONS[item.key].reserve};
+    }
+    currentWeaponKey=item.key; updateWeaponModel();
+    flashHUD('✅ '+WEAPONS[item.key].name);
+  }
+  updateHUD();
+}
+
 // ─── BEGIN GAME ───────────────────────────────────────────────────────────────
 function beginGame(){
   applyMap(selectedMap);
@@ -1852,11 +2349,31 @@ function beginGame(){
   document.getElementById('hud').style.display='block';
   const showWave=isSolo||(roomGameMode==='coop');
   document.getElementById('waveDisplay').style.display=showWave?'block':'none';
+  // Init new state
+  money=0; killStreak=0; speedBoostTimer=0;
+  handGrenades=3; handGrenadeRechargeTimer=0;
+  gunGameIdx=0; inCar=false; currentCar=null; nearCar=null; nearShop=null;
+  achievementsUnlocked={}; sniperKillCount=0; buildCount=0; firstBloodDone=false;
+  document.getElementById('moneyNum').textContent=0;
+  document.getElementById('grenadeCount').textContent=3;
   // Init weapons
-  playerWeapons={rifle:{ammo:30,reserve:120}};
-  currentWeaponKey='rifle';
+  if(roomGameMode==='gun'){
+    playerWeapons={pistol:{ammo:WEAPONS.pistol.ammo,reserve:WEAPONS.pistol.reserve}};
+    currentWeaponKey='pistol'; gunGameIdx=0;
+  } else {
+    playerWeapons={rifle:{ammo:30,reserve:120}};
+    currentWeaponKey='rifle';
+  }
   updateWeaponModel();
   updateHUD();
+  // Roads
+  addRoads();
+  // Spawn cars at road intersections
+  const carColors=[0xff2222,0x2255ff,0xffcc00,0xffffff,0xff8800,0x22aa22];
+  const carSpots=[{x:0,z:-70},{x:70,z:0},{x:-70,z:0},{x:0,z:70},{x:70,z:-70},{x:-70,z:70}];
+  carSpots.forEach((s,i)=>mkCar(s.x,s.z,carColors[i%carColors.length]));
+  // Spawn shops
+  [[-35,-35],[35,35],[-35,35]].forEach(([x,z])=>mkShop(x,z));
   // Scatter weapon crates
   for(let i=0;i<25;i++){
     const a=Math.random()*Math.PI*2,d=6+Math.random()*75;
@@ -1892,13 +2409,16 @@ function loop(t){
   const dt=Math.min((t-lastT)/1000,.05); lastT=t;
   if(gameStarted&&!gamePaused){
     updatePlayer(dt);
+    updateCars(dt);
     if(isSolo) updateEnemies(dt);
     updateGhost();
     updateParticles(dt);
     updateProjectiles(dt);
+    updateHandGrenades(dt);
     updateMinigun(dt);
     checkWave(dt);
     checkPickupNearby();
+    if(speedBoostTimer>0) speedBoostTimer-=dt;
     // float pickups
     weaponPickups.forEach(p=>{
       if(p.active){p.floatT+=dt;p.mesh.position.y=p.baseY+Math.sin(p.floatT*2)*.18;p.mesh.rotation.y+=dt;}
@@ -1906,6 +2426,8 @@ function loop(t){
     healthPickups.forEach(p=>{
       if(p.active){p.floatT+=dt;p.mesh.position.y=p.baseY+Math.sin(p.floatT*2)*.15;p.mesh.rotation.y+=dt*.8;}
     });
+    // Rotate shop meshes
+    shopMeshes.forEach(s=>{s.mesh.rotation.y+=dt*0.5;});
     if(document.getElementById('scoreboard').style.display==='block') updateScoreboard();
   }
   renderer.render(scene,camera);
