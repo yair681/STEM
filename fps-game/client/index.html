@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="he">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FPS Arena - מרובה שחקנים</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a0f; color: #fff; font-family: 'Segoe UI', sans-serif; overflow: hidden; direction: rtl; }
+
+    #canvas { display: block; width: 100vw; height: 100vh; }
+
+    /* ─── Crosshair ─── */
+    #crosshair {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      pointer-events: none; display: none;
+    }
+    #crosshair div {
+      position: absolute; background: rgba(255,255,255,0.9);
+    }
+    #crosshair .h { width: 16px; height: 2px; top: -1px; left: -8px; }
+    #crosshair .v { width: 2px; height: 16px; top: -8px; left: -1px; }
+    #crosshair .dot { width: 3px; height: 3px; top: -1.5px; left: -1.5px; background: #f55; border-radius: 50%; }
+    #crosshair.hit .h, #crosshair.hit .v, #crosshair.hit .dot { background: #f55; }
+
+    /* ─── HUD ─── */
+    #hud {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      padding: 12px 20px; pointer-events: none; display: none;
+    }
+    #health-bar-wrap {
+      position: fixed; bottom: 20px; right: 20px;
+      background: rgba(0,0,0,0.6); border-radius: 8px;
+      padding: 8px 14px; border: 1px solid rgba(255,255,255,0.15);
+      min-width: 160px;
+    }
+    #health-label { font-size: 11px; color: #aaa; margin-bottom: 4px; }
+    #health-bar-bg { background: #333; border-radius: 4px; height: 10px; }
+    #health-bar { height: 10px; border-radius: 4px; transition: width 0.2s, background 0.3s; }
+    #health-text { font-size: 18px; font-weight: bold; margin-top: 4px; }
+
+    #ammo-display {
+      position: fixed; bottom: 20px; left: 20px;
+      background: rgba(0,0,0,0.6); border-radius: 8px;
+      padding: 8px 14px; border: 1px solid rgba(255,255,255,0.15);
+      text-align: left;
+    }
+    #weapon-name { font-size: 12px; color: #aaa; }
+    #ammo-count { font-size: 24px; font-weight: bold; }
+    #ammo-reserve { font-size: 13px; color: #aaa; }
+
+    #weapon-slots {
+      position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 6px; display: none;
+    }
+    .weapon-slot {
+      background: rgba(0,0,0,0.6); border: 1px solid #444;
+      border-radius: 6px; padding: 6px 12px; font-size: 12px;
+      min-width: 70px; text-align: center; color: #aaa;
+      transition: all 0.1s;
+    }
+    .weapon-slot.active { border-color: #fff; color: #fff; background: rgba(255,255,255,0.15); }
+    .weapon-slot.owned { color: #7cf; border-color: #7cf; }
+
+    #kill-feed {
+      position: fixed; top: 70px; right: 20px;
+      display: flex; flex-direction: column; gap: 4px; pointer-events: none;
+    }
+    .kill-entry {
+      background: rgba(0,0,0,0.7); border-radius: 4px;
+      padding: 5px 10px; font-size: 13px; border-right: 3px solid #f55;
+      animation: fadeIn 0.2s ease; direction: rtl;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; } }
+
+    #scoreboard {
+      position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.7); border-radius: 8px;
+      padding: 8px 16px; font-size: 13px; pointer-events: none;
+      display: none; border: 1px solid rgba(255,255,255,0.15);
+      min-width: 200px;
+    }
+    #scoreboard-title { text-align: center; font-weight: bold; margin-bottom: 6px; color: #aaa; font-size: 11px; }
+    .score-row { display: flex; justify-content: space-between; gap: 20px; padding: 2px 0; }
+    .score-row.me { color: #7cf; font-weight: bold; }
+
+    #level-display {
+      position: fixed; top: 10px; right: 20px;
+      background: rgba(0,0,0,0.6); border-radius: 6px;
+      padding: 5px 12px; font-size: 13px; color: #aaa;
+      display: none;
+    }
+
+    #pickup-hint {
+      position: fixed; top: 55%; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.7); border-radius: 6px;
+      padding: 8px 16px; font-size: 14px; pointer-events: none;
+      display: none; border: 1px solid #7cf; color: #7cf;
+    }
+
+    #hit-flash {
+      position: fixed; inset: 0; pointer-events: none;
+      background: radial-gradient(circle, transparent 60%, rgba(255,0,0,0.4) 100%);
+      opacity: 0; transition: opacity 0.1s;
+    }
+
+    #damage-indicator {
+      position: fixed; inset: 0; pointer-events: none; opacity: 0;
+      background: rgba(255, 30, 30, 0.25); transition: opacity 0.15s;
+    }
+
+    #death-screen {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; gap: 16px; z-index: 100;
+    }
+    #death-screen h2 { font-size: 48px; color: #f55; }
+    #death-screen p { color: #aaa; font-size: 18px; }
+    #death-timer { font-size: 28px; color: #fff; }
+
+    #reload-indicator {
+      position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.7); border-radius: 20px;
+      padding: 6px 20px; font-size: 13px; color: #ff9;
+      display: none;
+    }
+    #reload-bar-wrap { background: #333; border-radius: 10px; height: 4px; margin-top: 4px; }
+    #reload-bar { height: 4px; border-radius: 10px; background: #ff9; width: 0%; transition: width linear; }
+
+    /* ─── Lobby / Menu ─── */
+    #lobby {
+      position: fixed; inset: 0; background: linear-gradient(135deg, #0a0a1a 0%, #0d1f2d 100%);
+      display: flex; align-items: center; justify-content: center; z-index: 200;
+    }
+    #lobby-card {
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px; padding: 40px; width: 400px; text-align: center;
+    }
+    #lobby-card h1 { font-size: 36px; margin-bottom: 6px; background: linear-gradient(90deg,#7cf,#a5f); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+    #lobby-card p { color: #666; margin-bottom: 30px; font-size: 14px; }
+    .input-group { margin-bottom: 16px; text-align: right; }
+    .input-group label { display: block; font-size: 12px; color: #aaa; margin-bottom: 6px; }
+    .input-group input { width: 100%; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px; padding: 10px 14px; color: #fff; font-size: 15px; outline: none; }
+    .input-group input:focus { border-color: #7cf; }
+    .color-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px; }
+    .color-btn {
+      width: 32px; height: 32px; border-radius: 50%; border: 2px solid transparent;
+      cursor: pointer; transition: transform 0.1s;
+    }
+    .color-btn.selected { border-color: #fff; transform: scale(1.2); }
+    #join-btn {
+      width: 100%; padding: 14px; background: linear-gradient(90deg,#3a7cf5,#7c3af5);
+      border: none; border-radius: 10px; color: #fff; font-size: 16px; font-weight: bold;
+      cursor: pointer; transition: opacity 0.2s;
+    }
+    #join-btn:hover { opacity: 0.85; }
+    .controls-hint {
+      margin-top: 24px; background: rgba(0,0,0,0.3); border-radius: 8px;
+      padding: 12px; font-size: 12px; color: #666; text-align: right;
+    }
+    .controls-hint span { color: #aaa; }
+
+    /* ─── Connecting overlay ─── */
+    #connecting {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.9);
+      display: none; align-items: center; justify-content: center;
+      font-size: 22px; color: #7cf; z-index: 300;
+    }
+
+    /* ─── Pointer lock overlay ─── */
+    #click-to-play {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; gap: 12px; z-index: 150; cursor: pointer;
+    }
+    #click-to-play h2 { font-size: 28px; }
+    #click-to-play p { color: #aaa; }
+  </style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<!-- Lobby -->
+<div id="lobby">
+  <div id="lobby-card">
+    <h1>FPS Arena</h1>
+    <p>מרובה שחקנים · נשקים · שלבים</p>
+    <div class="input-group">
+      <label>שם שחקן</label>
+      <input type="text" id="player-name" placeholder="הכנס שם..." maxlength="16" value="">
+    </div>
+    <div class="input-group">
+      <label>צבע</label>
+      <div class="color-row" id="color-row"></div>
+    </div>
+    <button id="join-btn" onclick="joinGame()">כניסה למשחק</button>
+    <div class="controls-hint">
+      <span>WASD</span> — תנועה &nbsp;|&nbsp;
+      <span>עכבר</span> — כוון &nbsp;|&nbsp;
+      <span>לחיצה</span> — ירי<br>
+      <span>1/2/3/4</span> — נשקים &nbsp;|&nbsp;
+      <span>R</span> — טעינה &nbsp;|&nbsp;
+      <span>F</span> — איסוף נשק &nbsp;|&nbsp;
+      <span>TAB</span> — טבלת ניקוד
+    </div>
+  </div>
+</div>
+
+<!-- Connecting -->
+<div id="connecting">מתחבר לשרת...</div>
+
+<!-- Click to play -->
+<div id="click-to-play" onclick="requestPointerLock()">
+  <h2>לחץ להמשך</h2>
+  <p>לחץ כדי לנעול את העכבר ולשחק</p>
+</div>
+
+<!-- Crosshair -->
+<div id="crosshair">
+  <div class="h"></div>
+  <div class="v"></div>
+  <div class="dot"></div>
+</div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="health-bar-wrap">
+    <div id="health-label">חיים</div>
+    <div id="health-bar-bg"><div id="health-bar" style="width:100%;background:#4f4"></div></div>
+    <div id="health-text">100</div>
+  </div>
+
+  <div id="ammo-display">
+    <div id="weapon-name">אקדח</div>
+    <div id="ammo-count">12 <span style="font-size:14px;color:#aaa">/ 60</span></div>
+  </div>
+
+  <div id="weapon-slots"></div>
+  <div id="level-display"></div>
+  <div id="kill-feed"></div>
+  <div id="scoreboard"><div id="scoreboard-title">טבלת ניקוד</div><div id="scoreboard-rows"></div></div>
+
+  <div id="pickup-hint">לחץ F לאיסוף נשק</div>
+</div>
+
+<div id="hit-flash"></div>
+<div id="damage-indicator"></div>
+<div id="death-screen">
+  <h2>נהרגת!</h2>
+  <p id="killed-by"></p>
+  <div id="death-timer">3</div>
+</div>
+<div id="reload-indicator">טוען... <div id="reload-bar-wrap"><div id="reload-bar"></div></div></div>
+
+<!-- Three.js CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+<!-- Socket.io CDN -->
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+<script src="js/game.js"></script>
+</body>
+</html>
