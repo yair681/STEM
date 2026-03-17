@@ -124,6 +124,25 @@ io.on('connection', (socket) => {
     });
   });
 
+  socket.on('playerHit', ({ targetId, damage }) => {
+    const room = rooms.get(socket.roomCode);
+    if (!room) return;
+    const victim = room.players.get(targetId);
+    if (!victim) return;
+    if (victim.hp === undefined) victim.hp = 100;
+    victim.hp -= damage;
+    // Send hit to victim
+    io.to(targetId).emit('hit', { damage, from: socket.id, health: victim.hp });
+    if (victim.hp <= 0) {
+      victim.hp = 100; // reset for respawn
+      const killer = room.players.get(socket.id);
+      if (killer) killer.kills++;
+      const scores = {};
+      room.players.forEach((p, id) => { scores[id] = { name: p.name, kills: p.kills }; });
+      io.to(room.code).emit('playerDied', { deadId: targetId, killerId: socket.id, scores });
+    }
+  });
+
   socket.on('playerKill', ({ victimId }) => {
     const room = rooms.get(socket.roomCode);
     if (!room) return;

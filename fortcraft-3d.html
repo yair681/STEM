@@ -584,8 +584,9 @@ function shoot(){
     enemies.forEach(e=>e.children.filter(c=>c.isMesh).forEach(m=>targets.push(m)));
     envObjects.forEach(o=>{if(o.traverse)o.traverse(c=>{if(c.isMesh&&!targets.includes(c))targets.push(c);});});
     structures.forEach(s=>targets.push(s));
-    // loot boxes
     lootBoxes.forEach(b=>{if(!b.isOpen)targets.push(b.mesh);});
+    // remote players
+    Object.entries(remotePlayerMeshes).forEach(([id,g])=>g.children.filter(c=>c.isMesh).forEach(m=>{m.userData.remoteId=id;targets.push(m);}));
     const hits=rc.intersectObjects(targets,false);
     if(hits.length>0){
       const h=hits[0];
@@ -593,6 +594,13 @@ function shoot(){
       // loot box hit?
       const hitBox=lootBoxes.find(b=>!b.isOpen&&b.mesh===h.object);
       if(hitBox){hitLootBox(hitBox,h.point);continue;}
+      // remote player hit?
+      if(h.object.userData.remoteId){
+        const dmg=WEAPONS[currentWeaponKey].damage+Math.floor(Math.random()*10);
+        spawnText(h.point,`-${dmg}`,'#ff4444');
+        socket?.emit('playerHit',{targetId:h.object.userData.remoteId,damage:dmg});
+        continue;
+      }
       // enemy hit?
       let hitE=null;
       enemies.forEach(e=>{e.children.forEach(c=>{if(c===h.object)hitE=e;});});
@@ -929,9 +937,18 @@ function connectSocket(){
       updateRemotePlayer(data);
     });
     socket.on('playerLeft',({id})=>{removeRemotePlayer(id);});
+    socket.on('hit',({damage,health})=>{
+      hp=Math.max(0,health);
+      updateHUD();
+      const fl=document.getElementById('hitFlash');
+      fl.style.background='rgba(255,0,0,.3)';
+      setTimeout(()=>fl.style.background='rgba(255,0,0,0)',150);
+      spawnText(playerPos.clone().add(new THREE.Vector3(0,1,0)),`-${damage}`,'#ff2200');
+    });
     socket.on('playerDied',({deadId,killerId,scores})=>{
       if(killerId===socket?.id){kills++;document.getElementById('killCount').textContent=kills;}
-      addKillFeed(scores?.[killerId]?.name||'?',scores?.[deadId]?.name||'?');
+      const kName=scores?.[killerId]?.name||'?', vName=scores?.[deadId]?.name||'?';
+      addKillFeed(kName,vName);
       if(deadId===socket?.id) handleDeath();
     });
     socket.on('gameEnd',({scores})=>{
