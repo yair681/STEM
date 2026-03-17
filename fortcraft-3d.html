@@ -75,7 +75,12 @@ canvas{display:block;position:fixed;top:0;left:0;}
   <h1>⚡ FORTCRAFT</h1>
   <div class="subtitle">Build. Shoot. Survive.</div>
   <button class="btn" onclick="goSolo()">🤖 Solo vs AI</button>
-  <button class="btn sec" onclick="showCreate()">🏠 צור חדר</button>
+  <div style="display:flex;gap:8px;margin:4px 0;">
+    <button class="btn sec diffBtn sel" data-d="easy" onclick="setDiff('easy')" style="padding:8px 18px;font-size:13px;">😊 קל</button>
+    <button class="btn sec diffBtn" data-d="medium" onclick="setDiff('medium')" style="padding:8px 18px;font-size:13px;">😐 בינוני</button>
+    <button class="btn sec diffBtn" data-d="hard" onclick="setDiff('hard')" style="padding:8px 18px;font-size:13px;">💀 קשה</button>
+  </div>
+  <button class="btn sec" onclick="showCreate()" style="margin-top:8px;">🏠 צור חדר</button>
   <button class="btn sec" onclick="showJoin()">🔗 הצטרף לחדר</button>
   <div style="margin-top:22px;font-size:12px;color:#555;line-height:2;">
     WASD תנועה &nbsp;|&nbsp; עכבר כיוון &nbsp;|&nbsp; קליק ימני זום &nbsp;|&nbsp; גלגלת כיוון זום<br>
@@ -153,6 +158,15 @@ canvas{display:block;position:fixed;top:0;left:0;}
     <div class="hudChip" id="weapNameChip">רובה AR</div>
   </div>
   <div id="weaponHUD"></div>
+  <div id="minigunBar" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.7);border-radius:20px;padding:6px 16px;color:#ffcc00;font-size:13px;text-align:center;">
+    ⚙️ חימום מיניגאן<br>
+    <div style="width:180px;height:8px;background:rgba(255,255,255,.2);border-radius:4px;overflow:hidden;margin-top:4px;">
+      <div id="minigunFill" style="height:100%;background:#ffcc00;border-radius:4px;width:0%;transition:width .05s;"></div>
+    </div>
+  </div>
+  <div id="respawnOverlay" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.8);color:white;padding:30px 50px;border-radius:20px;text-align:center;font-size:28px;font-weight:bold;">
+    💀 מת!<br><span id="respawnNum" style="font-size:48px;color:#ffcc00;">3</span>
+  </div>
   <div id="pickupPrompt"></div>
   <div id="hitFlash"></div>
   <div id="killFeed"></div>
@@ -177,18 +191,31 @@ const WEAPONS = {
   sniper:  {name:'סנייפר',     ammo:5,   reserve:20,  damage:95,  fireRate:1400, auto:false, zoom:5.0, scope:true, color:0x1a1a6a},
   smg:     {name:'SMG',         ammo:40,  reserve:200, damage:11,  fireRate:75,   auto:true,  zoom:1.5, color:0x444444},
   lmg:     {name:'מקלע',        ammo:100, reserve:300, damage:15,  fireRate:85,   auto:true,  zoom:1.6, color:0x777733},
-  minigun: {name:'מיניגאן',    ammo:200, reserve:400, damage:9,   fireRate:35,   auto:true,  zoom:1.2, color:0x445566},
+  minigun: {name:'מיניגאן',    ammo:200, reserve:400, damage:9,   fireRate:35,   auto:true,  zoom:1.2, color:0x445566, warmup:60},
   rocket:  {name:'תותח רקטות', ammo:4,   reserve:16,  damage:120, fireRate:1500, auto:false, zoom:1.5, splash:10, color:0xcc4400, projectile:true},
   plasma:  {name:'רובה פלזמה', ammo:25,  reserve:75,  damage:35,  fireRate:300,  auto:true,  zoom:2.0, color:0x0066ff, projectile:true},
-  grenade: {name:'מטול רימונים',ammo:5,   reserve:20,  damage:90,  fireRate:1200, auto:false, zoom:1.2, splash:7, color:0x446622, projectile:true, arc:true}
+  grenade: {name:'מטול רימונים',ammo:5,   reserve:20,  damage:90,  fireRate:1200, auto:false, zoom:1.2, splash:7, color:0x446622, projectile:true, arc:true, arcForce:14}
 };
 const WK = Object.keys(WEAPONS);
+
+// ─── WEAPON RARITY ───────────────────────────────────────────────────────────
+const RARITY={pistol:'common',rifle:'common',smg:'common',shotgun:'rare',lmg:'rare',sniper:'rare',minigun:'epic',rocket:'epic',plasma:'epic',grenade:'epic'};
+const RARITY_WEIGHT={common:50,rare:30,epic:10};
+const RARITY_LABEL={common:'⬜ נפוץ',rare:'🟦 נדיר',epic:'🟪 אגדי'};
+function randomWeapon(){
+  const pool=[];
+  WK.forEach(k=>{const w=RARITY_WEIGHT[RARITY[k]||'common'];for(let i=0;i<w;i++)pool.push(k);});
+  return pool[Math.floor(Math.random()*pool.length)];
+}
 
 // ─── GAME STATE ──────────────────────────────────────────────────────────────
 let gameStarted=false, gamePaused=false, gameMode='solo', isSolo=true;
 let playerName='Player', myRoomCode='', amAdmin=false;
 let roomGameMode='ffa', roomTimeLimit=10;
 let hp=100, kills=0, wave=1;
+let difficulty='medium'; // easy/medium/hard
+let minigunWarmup=0, minigunReady=false; // warm-up system
+let respawnCountdown=0;
 let playerWeapons={}, currentWeaponKey='rifle';
 let canShoot=true, reloading=false;
 let yaw=0, pitch=0;
@@ -407,15 +434,19 @@ function openLootBox(box){
   }
   scene.remove(box.mesh);
   // spawn random weapon pickup
-  const type=WK[Math.floor(Math.random()*WK.length)];
+  const type=randomWeapon();
   const col=WEAPONS[type].color;
+  const rar=RARITY[type]||'common';
+  const glowCol=rar==='epic'?0xaa44ff:rar==='rare'?0x4488ff:0xffcc00;
   const pickMesh=new THREE.Mesh(
     new THREE.SphereGeometry(.38,8,8),
-    new THREE.MeshLambertMaterial({color:col,emissive:col,emissiveIntensity:.4})
+    new THREE.MeshLambertMaterial({color:col,emissive:glowCol,emissiveIntensity:.5})
   );
   pickMesh.position.set(pos.x,.4,pos.z); scene.add(pickMesh);
   // label
-  spawnText(pos,`🎁 ${WEAPONS[type].name}`,'#ffcc00');
+  spawnText(pos,`🎁 ${RARITY_LABEL[rar]} ${WEAPONS[type].name}`,'#ffcc00');
+  // respawn crate after 30s
+  setTimeout(()=>{const a=Math.random()*Math.PI*2,d=8+Math.random()*70;mkLootBox(Math.cos(a)*d,Math.sin(a)*d);},30000);
   const baseY=.4;
   const pickup={mesh:pickMesh,type,active:true,baseY,floatT:Math.random()*Math.PI*2};
   weaponPickups.push(pickup);
@@ -450,6 +481,8 @@ function openHealthCrate(box){
   pickMesh.position.set(pos.x,.4,pos.z); scene.add(pickMesh);
   spawnText(pos,'❤️ +50','#ff4444');
   healthPickups.push({mesh:pickMesh,active:true,baseY:.4,floatT:Math.random()*Math.PI*2});
+  // respawn health crate after 25s
+  setTimeout(()=>{const a=Math.random()*Math.PI*2,d=8+Math.random()*65;mkHealthCrate(Math.cos(a)*d,Math.sin(a)*d);},25000);
 }
 
 function checkPickupNearby(){
@@ -565,7 +598,11 @@ function mkEnemy(x,z){
   barFill.position.set(-.001,2.901,.001); g.add(barFill);
   const botWeps=['pistol','rifle','shotgun','smg','lmg','rocket','plasma'];
   const wk=botWeps[Math.floor(Math.random()*botWeps.length)];
-  g.userData={isEnemy:true,hp:100,maxHp:100,barFill,speed:2.5+Math.random()*1.5,shootTimer:2+Math.random()*2,weaponKey:wk};
+  const diff=DIFF[difficulty]||DIFF.medium;
+  g.userData={isEnemy:true,hp:100,maxHp:100,barFill,
+    speed:(2.5+Math.random()*1.5)*diff.enemySpeedMult,
+    shootTimer:2+Math.random()*2,weaponKey:wk,
+    healTimer:0,coverTarget:null,coverTimer:0};
   g.position.set(x,0,z);
   scene.add(g); enemies.push(g); return g;
 }
@@ -590,22 +627,60 @@ function killEnemy(e){
   setTimeout(()=>{if(enemies.length<10)mkEnemy((Math.random()-.5)*160,(Math.random()-.5)*160);},4000);
 }
 function updateEnemies(dt){
+  const diff=DIFF[difficulty]||DIFF.medium;
   enemies.forEach(e=>{
     const toP=new THREE.Vector3().subVectors(playerPos,e.position);
     const dist=toP.length();
     e.rotation.y=Math.atan2(toP.x,toP.z);
     const bar=e.userData.barFill;
-    if(bar){bar.lookAt(camera.position);e.children[e.children.length-2].lookAt(camera.position);}
-    if(dist>5){const spd=e.userData.speed;e.position.x+=(toP.x/dist)*spd*dt;e.position.z+=(toP.z/dist)*spd*dt;}
+    if(bar){bar.lookAt(camera.position);e.children[e.children.length-2]?.lookAt(camera.position);}
+
+    // Self-heal when low HP
+    const hpPct=e.userData.hp/e.userData.maxHp;
+    if(diff.healSelf&&hpPct<0.3&&e.userData.hp>0){
+      e.userData.healTimer=(e.userData.healTimer||0)+dt;
+      if(e.userData.healTimer>=0.5){
+        e.userData.hp=Math.min(e.userData.maxHp,e.userData.hp+5);
+        updateEnemyHP(e); e.userData.healTimer=0;
+      }
+      return; // stand still while healing
+    } else e.userData.healTimer=0;
+
+    // Cover-seeking: when taking damage move toward nearest obstacle
+    e.userData.coverTimer=(e.userData.coverTimer||0)-dt;
+    if(dist>5){
+      let tx=playerPos.x, tz=playerPos.z;
+      // If hurt recently, dodge sideways
+      if(e.userData.dodging){
+        tx=e.position.x+Math.cos(e.rotation.y+Math.PI/2)*8;
+        tz=e.position.z+Math.sin(e.rotation.y+Math.PI/2)*8;
+        e.userData.dodgeTimer=(e.userData.dodgeTimer||0)-dt;
+        if(e.userData.dodgeTimer<=0) e.userData.dodging=false;
+      }
+      const dx=tx-e.position.x, dz=tz-e.position.z;
+      const d2=Math.sqrt(dx*dx+dz*dz);
+      if(d2>0.1){
+        e.position.x+=dx/d2*e.userData.speed*dt;
+        e.position.z+=dz/d2*e.userData.speed*dt;
+      }
+    }
     e.userData.shootTimer-=dt;
-    if(e.userData.shootTimer<=0&&dist<45){e.userData.shootTimer=2+Math.random()*2;enemyFire(e,dist);}
+    if(e.userData.shootTimer<=0&&dist<50){
+      e.userData.shootTimer=(2+Math.random()*2)/diff.enemyAccMult;
+      enemyFire(e,dist);
+    }
   });
 }
 function enemyFire(e,dist){
   const toP=new THREE.Vector3().subVectors(playerPos,e.position).normalize();
   toP.x+=(Math.random()-.5)*.22; toP.z+=(Math.random()-.5)*.22; toP.normalize();
-  const acc=Math.max(0,1-dist/50)*.55;
-  if(Math.random()>acc) return;
+  const diff=DIFF[difficulty]||DIFF.medium;
+  const acc=Math.max(0,1-dist/50)*.55*diff.enemyAccMult;
+  if(Math.random()>acc){
+    // missed - trigger dodge
+    e.userData.dodging=true; e.userData.dodgeTimer=1.5;
+    return;
+  }
   const wk=e.userData.weaponKey||'rifle';
   const wDef=WEAPONS[wk]||WEAPONS.rifle;
   const origin=e.position.clone().add(new THREE.Vector3(0,1.8,0));
@@ -614,7 +689,7 @@ function enemyFire(e,dist){
     spawnEnemyProjectile(origin,toP,wDef);
     return;
   }
-  const dmg=wDef.damage+Math.floor(Math.random()*8);
+  const dmg=Math.round((wDef.damage+Math.floor(Math.random()*8))*diff.enemyDmgMult);
   hp=Math.max(0,hp-dmg); updateHUD();
   const fl=document.getElementById('hitFlash');
   fl.style.background='rgba(255,0,0,.28)';
@@ -636,6 +711,34 @@ function checkWave(dt){
   }
 }
 
+// ─── DIFFICULTY ──────────────────────────────────────────────────────────────
+function setDiff(d){
+  difficulty=d;
+  document.querySelectorAll('.diffBtn').forEach(b=>b.classList.toggle('sel',b.dataset.d===d));
+}
+const DIFF={
+  easy:  {enemyDmgMult:.5, enemySpeedMult:.7, enemyAccMult:.5, healSelf:false},
+  medium:{enemyDmgMult:1,  enemySpeedMult:1,  enemyAccMult:1,  healSelf:true},
+  hard:  {enemyDmgMult:1.6,enemySpeedMult:1.4,enemyAccMult:1.4,healSelf:true}
+};
+
+// ─── MINIGUN WARM-UP ─────────────────────────────────────────────────────────
+let minigunHeld=false;
+function updateMinigun(dt){
+  const isMG=currentWeaponKey==='minigun';
+  if(!isMG){minigunWarmup=0;minigunReady=false;document.getElementById('minigunBar').style.display='none';return;}
+  if(minigunHeld&&gameStarted&&!gamePaused){
+    minigunWarmup=Math.min(1,minigunWarmup+dt*2.5);
+    minigunReady=minigunWarmup>=1;
+    document.getElementById('minigunBar').style.display='block';
+    document.getElementById('minigunFill').style.width=(minigunWarmup*100)+'%';
+  } else {
+    minigunWarmup=Math.max(0,minigunWarmup-dt*1.5);
+    minigunReady=false;
+    if(minigunWarmup===0) document.getElementById('minigunBar').style.display='none';
+  }
+}
+
 // ─── PROJECTILE SYSTEM ───────────────────────────────────────────────────────
 const projectiles=[];
 
@@ -653,7 +756,7 @@ function spawnProjectile(pos,dir,wk){
   mesh.position.copy(pos);
   scene.add(mesh);
   const speed=wk==='plasma'?80:wk==='rocket'?40:35;
-  projectiles.push({mesh,dir:dir.clone(),speed,wk,fromEnemy:false,life:5,arcVelY:wDef.arc?8:0});
+  projectiles.push({mesh,dir:dir.clone(),speed,wk,fromEnemy:false,life:5,arcVelY:wDef.arc?(wDef.arcForce||8):0});
 }
 
 function spawnEnemyProjectile(pos,dir,wDef){
@@ -700,11 +803,13 @@ function explosionFX(pos,radius,dmg,fromEnemy){
         if(e.userData.hp<=0) killEnemy(e);
       }
     }
-    // Damage structures
-    for(let i=structures.length-1;i>=0;i--){
-      if(structures[i].position.distanceTo(pos)<radius*1.2){
-        structures[i].userData.hp-=dmg*0.7;
-        if(structures[i].userData.hp<=0){scene.remove(structures[i]);structures.splice(i,1);}
+    // Damage structures (only enemy explosions hurt player's structures)
+    if(fromEnemy){
+      for(let i=structures.length-1;i>=0;i--){
+        if(structures[i].position.distanceTo(pos)<radius*1.2){
+          structures[i].userData.hp-=dmg*0.7;
+          if(structures[i].userData.hp<=0){scene.remove(structures[i]);structures.splice(i,1);}
+        }
       }
     }
   }
@@ -792,6 +897,8 @@ let autoShootIv=null;
 
 function shoot(){
   if(!canShoot||reloading||buildMode||gamePaused) return;
+  // Minigun requires warm-up
+  if(currentWeaponKey==='minigun'&&!minigunReady) return;
   const w=playerWeapons[currentWeaponKey];
   if(!w||w.ammo<=0){if(w&&w.reserve>0)reload();return;}
   canShoot=false;
@@ -838,9 +945,11 @@ function shoot(){
       }
       // remote player hit?
       if(h.object.userData.remoteId){
+        // No friendly fire in co-op
+        if(roomGameMode==='coop'){continue;}
         const dmg=WEAPONS[currentWeaponKey].damage+Math.floor(Math.random()*10);
         spawnText(h.point,`-${dmg}`,'#ff4444');
-        socket?.emit('playerHit',{targetId:h.object.userData.remoteId,damage:dmg});
+        socket?.emit('playerHit',{targetId:h.object.userData.remoteId,damage:dmg,weapon:currentWeaponKey});
         continue;
       }
       // enemy hit?
@@ -987,17 +1096,26 @@ function handleDeath(){
     // solo = game over
     showGameOver(null);
   } else {
-    // room mode: respawn with random weapon
-    playerWeapons={};
-    const t=WK[Math.floor(Math.random()*WK.length)];
-    playerWeapons[t]={ammo:WEAPONS[t].ammo,reserve:WEAPONS[t].reserve};
-    currentWeaponKey=t;
-    hp=100;
-    // teleport to random spawn
-    const a=Math.random()*Math.PI*2,d=20+Math.random()*30;
-    playerPos.set(Math.cos(a)*d,1.8,Math.sin(a)*d);
-    updateWeaponModel(); updateHUD();
-    spawnText(playerPos.clone().add(new THREE.Vector3(0,1,0)),'⟳ RESPAWN','#00aaff');
+    // room mode: countdown then respawn
+    let count=3;
+    const ro=document.getElementById('respawnOverlay');
+    const rn=document.getElementById('respawnNum');
+    ro.style.display='block'; rn.textContent=count;
+    const civ=setInterval(()=>{
+      count--;
+      if(count<=0){
+        clearInterval(civ); ro.style.display='none';
+        // respawn with random weapon
+        playerWeapons={};
+        const t=WK[Math.floor(Math.random()*WK.length)];
+        playerWeapons[t]={ammo:WEAPONS[t].ammo,reserve:WEAPONS[t].reserve};
+        currentWeaponKey=t; hp=100;
+        const a=Math.random()*Math.PI*2,d=20+Math.random()*30;
+        playerPos.set(Math.cos(a)*d,1.8,Math.sin(a)*d);
+        updateWeaponModel(); updateHUD();
+        spawnText(playerPos.clone().add(new THREE.Vector3(0,1,0)),'⟳ RESPAWN','#00aaff');
+      } else rn.textContent=count;
+    },1000);
   }
 }
 
@@ -1102,6 +1220,7 @@ document.addEventListener('mousedown',e=>{
   if(e.button===0){
     if(buildMode) placeBuild();
     else{
+      if(currentWeaponKey==='minigun') minigunHeld=true;
       shoot();
       if(WEAPONS[currentWeaponKey]?.auto){
         clearInterval(autoShootIv);
@@ -1112,7 +1231,7 @@ document.addEventListener('mousedown',e=>{
   if(e.button===2){e.preventDefault();setZoom(true);}
 });
 document.addEventListener('mouseup',e=>{
-  if(e.button===0) clearInterval(autoShootIv);
+  if(e.button===0){clearInterval(autoShootIv);minigunHeld=false;}
   if(e.button===2) setZoom(false);
 });
 document.addEventListener('wheel',e=>{
@@ -1257,6 +1376,16 @@ function connectSocket(){
   } catch(err){console.warn('Socket error',err);socket=null;}
 }
 
+function makeNameLabel(name){
+  const cv=document.createElement('canvas'); cv.width=256; cv.height=48;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.roundRect(4,4,248,40,8); ctx.fill();
+  ctx.fillStyle='#ffffff'; ctx.font='bold 24px Arial'; ctx.textAlign='center';
+  ctx.fillText(name,128,32);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv),transparent:true,depthTest:false}));
+  sp.scale.set(2.2,.55,1); return sp;
+}
+
 function updateRemotePlayer(data){
   if(!remotePlayerMeshes[data.id]){
     const g=new THREE.Group();
@@ -1264,6 +1393,13 @@ function updateRemotePlayer(data){
     body.position.y=.5; g.add(body);
     const head=new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.5),new THREE.MeshLambertMaterial({color:0xfde68a}));
     head.position.y=1.25; g.add(head);
+    // Name label
+    const label=makeNameLabel(data.name||'Player');
+    label.position.y=2.2; g.add(label);
+    // Weapon indicator
+    const wInd=new THREE.Mesh(new THREE.BoxGeometry(.08,.08,.3),new THREE.MeshLambertMaterial({color:0x222222}));
+    wInd.position.set(.4,.8,-.1); wInd.rotation.y=Math.PI/2; g.add(wInd);
+    g.userData={wInd,label};
     g.position.set(data.x,0,data.z);
     scene.add(g);
     remotePlayerMeshes[data.id]=g;
@@ -1271,6 +1407,11 @@ function updateRemotePlayer(data){
   const m=remotePlayerMeshes[data.id];
   m.position.set(data.x,0,data.z);
   m.rotation.y=data.rotY||0;
+  // Update weapon color indicator
+  if(data.currentWeapon&&m.userData.wInd){
+    const col=WEAPONS[data.currentWeapon]?.color||0x222222;
+    m.userData.wInd.material.color.setHex(col);
+  }
   remotePlayers[data.id]={...data};
 }
 function removeRemotePlayer(id){
@@ -1284,7 +1425,7 @@ function startSync(){
   clearInterval(syncIv);
   syncIv=setInterval(()=>{
     if(!socket||!gameStarted) return;
-    socket.emit('playerMove',{x:playerPos.x,y:playerPos.y,z:playerPos.z,rotY:yaw});
+    socket.emit('playerMove',{x:playerPos.x,y:playerPos.y,z:playerPos.z,rotY:yaw,currentWeapon:currentWeaponKey});
   },50);
 }
 
@@ -1412,6 +1553,7 @@ function loop(t){
     updateGhost();
     updateParticles(dt);
     updateProjectiles(dt);
+    updateMinigun(dt);
     checkWave(dt);
     checkPickupNearby();
     // float pickups
