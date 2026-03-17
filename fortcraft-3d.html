@@ -258,8 +258,18 @@ canvas{display:block;position:fixed;top:0;left:0;}
   <div id="instructions">ESC — פוס (Solo)<br>TAB — ניקוד<br>R — טעינה<br>F — לקחת נשק<br>X — החלף נשק<br>B — בנייה<br>T — צ'אט<br>Shift — ריצה<br>E — רכב/חנות<br>G — רימון<br>Z — אמוג'י</div>
   <div id="carHUD" style="display:none;position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:white;padding:10px 26px;border-radius:14px;font-size:15px;border:2px solid #ffcc00;text-align:center;">
     🚗 <b id="carSpeedNum">0</b> קמ"ש &nbsp;|&nbsp; <span style="color:#aaa;font-size:12px;">W/S נסיעה &nbsp; עכבר היגוי &nbsp; E לצאת</span>
+    &nbsp;|&nbsp; <span id="taxiStatus" style="color:#ffdd88;font-size:12px;"></span>
   </div>
 </div>
+
+<!-- Taxi map overlay -->
+<div id="taxiMapOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:9000;align-items:center;justify-content:center;flex-direction:column;">
+  <div style="color:#ffdd00;font-size:22px;font-weight:bold;margin-bottom:10px;">🗺️ בחר יעד לנסיעה</div>
+  <div style="color:#aaa;font-size:14px;margin-bottom:14px;">עלות נסיעה: <b style="color:#ffaa00">100 💰</b> &nbsp;|&nbsp; לחץ על המפה לבחור יעד</div>
+  <canvas id="taxiMapCanvas" width="420" height="420" style="border:3px solid #ffaa00;border-radius:12px;cursor:crosshair;"></canvas>
+  <button onclick="closeTaxiMap()" style="margin-top:14px;padding:10px 30px;background:#cc2222;color:white;border:none;border-radius:8px;font-size:16px;cursor:pointer;">❌ ביטול</button>
+</div>
+
 <div id="chatBox"></div>
 <input id="chatInput" placeholder="💬 הודעה... (Enter לשלוח, Esc לסגור)">
 
@@ -401,6 +411,7 @@ const GUN_GAME_SEQ=['pistol','smg','rifle','shotgun','lmg','sniper','plasma','ro
 const cars=[];
 let inCar=false, currentCar=null;
 let nearCar=null, nearShop=null;
+let taxiDriving=false, taxiDest=null;
 // Shop system
 const shopMeshes=[];
 let shopOpen=false;
@@ -2245,11 +2256,33 @@ function updateCars(dt){
   const steerDiff=yaw-car.rot;
   const steerNorm=Math.atan2(Math.sin(steerDiff),Math.cos(steerDiff));
   car.rot+=steerNorm*Math.min(1,Math.abs(car.vel/10)+0.3)*dt*4;
-  // Acceleration
+  // Taxi auto-drive
+  if(taxiDriving&&taxiDest){
+    const tdx=taxiDest.x-car.pos.x, tdz=taxiDest.z-car.pos.z;
+    const tdist=Math.sqrt(tdx*tdx+tdz*tdz);
+    if(tdist<3){
+      // Arrived
+      taxiDriving=false; taxiDest=null; car.vel=0;
+      document.getElementById('taxiStatus').textContent='';
+      flashHUD('🚕 הגעת ליעד!');
+    } else {
+      // Steer toward destination
+      const targetAngle=Math.atan2(-tdx,-tdz);
+      const angleDiff=Math.atan2(Math.sin(targetAngle-car.rot),Math.cos(targetAngle-car.rot));
+      car.rot+=angleDiff*Math.min(1,Math.abs(angleDiff))*dt*3;
+      yaw=car.rot;
+      // Slow down near dest
+      const taxiSpeed=tdist<20?Math.max(5,tdist*0.8):18;
+      car.vel=Math.min(taxiSpeed,car.vel+8*dt);
+    }
+  }
+  // Acceleration (manual, only if not taxi)
   const accel=16, brakeForce=22, friction=10, maxFwd=30, maxRev=-10;
-  if(keys['KeyW']||keys['ArrowUp']) car.vel=Math.min(maxFwd,car.vel+accel*dt);
-  else if(keys['KeyS']||keys['ArrowDown']) car.vel=Math.max(maxRev,car.vel-brakeForce*dt);
-  else car.vel+=(car.vel>0?-1:car.vel<0?1:0)*friction*dt, (Math.abs(car.vel)<0.2&&(car.vel=0));
+  if(!taxiDriving){
+    if(keys['KeyW']||keys['ArrowUp']) car.vel=Math.min(maxFwd,car.vel+accel*dt);
+    else if(keys['KeyS']||keys['ArrowDown']) car.vel=Math.max(maxRev,car.vel-brakeForce*dt);
+    else car.vel+=(car.vel>0?-1:car.vel<0?1:0)*friction*dt, (Math.abs(car.vel)<0.2&&(car.vel=0));
+  }
   // Move
   car.pos.x+=Math.sin(-car.rot)*car.vel*dt;
   car.pos.z+=Math.cos(-car.rot)*car.vel*dt;
@@ -2270,17 +2303,102 @@ function updateCars(dt){
 function enterExitCar(){
   if(inCar&&currentCar){
     // Exit
+    taxiDriving=false; taxiDest=null;
     inCar=false; currentCar.occupied=false;
     playerPos.set(currentCar.pos.x+2,1.8,currentCar.pos.z+2);
     currentCar=null;
+    document.getElementById('taxiStatus').textContent='';
     flashHUD('יצאת מהמכונית');
   } else if(nearCar){
     // Enter
     inCar=true; nearCar.occupied=true; currentCar=nearCar;
     unlockAchievement('driver');
-    flashHUD('🚗 נכנסת למכונית! W/S לנהיגה');
+    flashHUD('🚗 נכנסת למכונית!');
+    openTaxiMap();
   }
 }
+
+function openTaxiMap(){
+  document.exitPointerLock&&document.exitPointerLock();
+  const ov=document.getElementById('taxiMapOverlay');
+  ov.style.display='flex';
+  drawTaxiMapCanvas();
+}
+
+function closeTaxiMap(){
+  document.getElementById('taxiMapOverlay').style.display='none';
+  // Re-request pointer lock
+  renderer.domElement.requestPointerLock&&renderer.domElement.requestPointerLock();
+}
+
+function drawTaxiMapCanvas(destX,destZ){
+  const cv=document.getElementById('taxiMapCanvas');
+  const ctx=cv.getContext('2d');
+  const W=420, H=420;
+  const WORLD=200; // world range -200..+200
+  function wx(x){return (x+WORLD)/(WORLD*2)*W;}
+  function wz(z){return (z+WORLD)/(WORLD*2)*H;}
+  // Background
+  ctx.fillStyle='#3a5c3a'; ctx.fillRect(0,0,W,H);
+  // Roads (N-S)
+  ctx.fillStyle='#666'; [-60,0,60].forEach(x=>{ctx.fillRect(wx(x)-3,0,6,H);});
+  // Roads (E-W)
+  [-60,0,60].forEach(z=>{ctx.fillRect(0,wz(z)-3,W,6);});
+  // Shops (orange dots)
+  ctx.fillStyle='#ffaa00';
+  shopMeshes.forEach(s=>{ctx.beginPath();ctx.arc(wx(s.pos.x),wz(s.pos.z),7,0,Math.PI*2);ctx.fill();});
+  ctx.fillStyle='#ffff88'; ctx.font='10px Arial'; ctx.textAlign='center';
+  shopMeshes.forEach(s=>{ctx.fillText('🛒',wx(s.pos.x),wz(s.pos.z)-9);});
+  // Cars (yellow dots)
+  cars.forEach(c=>{
+    ctx.fillStyle=c===currentCar?'#00ccff':'#ffff00';
+    ctx.beginPath();ctx.arc(wx(c.pos.x),wz(c.pos.z),5,0,Math.PI*2);ctx.fill();
+  });
+  // Player position
+  const px=wx(playerPos.x), pz=wz(playerPos.z);
+  ctx.fillStyle='#00ccff';
+  ctx.beginPath();ctx.arc(px,pz,8,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#ffffff'; ctx.font='bold 10px Arial'; ctx.textAlign='center';
+  ctx.fillText('אתה',px,pz-11);
+  // Destination marker
+  if(destX!==undefined){
+    const dx=wx(destX), dz=wz(destZ);
+    ctx.fillStyle='#ff3333';
+    ctx.beginPath();ctx.arc(dx,dz,9,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#ffffff';ctx.font='bold 11px Arial';ctx.textAlign='center';
+    ctx.fillText('יעד',dx,dz-12);
+  }
+  // Legend
+  ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(5,H-42,160,38);
+  ctx.fillStyle='#fff';ctx.font='11px Arial';ctx.textAlign='left';
+  ctx.fillText('🔵 אתה  🟡 מכוניות  🟠 חנויות',12,H-22);
+  ctx.fillText('לחץ על המפה לבחור יעד',12,H-8);
+}
+
+function startTaxi(worldX,worldZ){
+  if(money<100){flashHUD('אין מספיק כסף! (100 💰)');closeTaxiMap();return;}
+  money-=100;
+  document.getElementById('moneyNum').textContent=money;
+  taxiDest={x:worldX,z:worldZ};
+  taxiDriving=true;
+  document.getElementById('taxiStatus').textContent='🚕 נוסע ל-יעד...';
+  closeTaxiMap();
+  flashHUD('🚕 המכונית נוסעת ליעד!');
+}
+
+// Canvas click handler for taxi map
+document.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('taxiMapCanvas').addEventListener('click',(e)=>{
+    const cv=document.getElementById('taxiMapCanvas');
+    const rect=cv.getBoundingClientRect();
+    const cx=e.clientX-rect.left, cz=e.clientY-rect.top;
+    const WORLD=200, W=420, H=420;
+    const worldX=(cx/W)*(WORLD*2)-WORLD;
+    const worldZ=(cz/H)*(WORLD*2)-WORLD;
+    drawTaxiMapCanvas(worldX,worldZ);
+    startTaxi(worldX,worldZ);
+  });
+});
 
 // ─── SHOP SYSTEM ─────────────────────────────────────────────────────────────
 function mkShop(x,z){
@@ -2382,7 +2500,7 @@ function beginGame(){
   // Init new state
   money=0; killStreak=0; speedBoostTimer=0;
   handGrenades=3; handGrenadeRechargeTimer=0;
-  gunGameIdx=0; inCar=false; currentCar=null; nearCar=null; nearShop=null;
+  gunGameIdx=0; inCar=false; currentCar=null; nearCar=null; nearShop=null; taxiDriving=false; taxiDest=null;
   achievementsUnlocked={}; sniperKillCount=0; buildCount=0; firstBloodDone=false;
   document.getElementById('moneyNum').textContent=0;
   document.getElementById('grenadeCount').textContent=3;
