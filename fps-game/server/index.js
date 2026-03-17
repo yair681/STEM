@@ -38,7 +38,8 @@ function broadcastLobby(room) {
   io.to(room.code).emit('lobbyUpdate', {
     players: getRoomPlayers(room),
     mode: room.mode,
-    timeLimit: room.timeLimit
+    timeLimit: room.timeLimit,
+    map: room.map
   });
 }
 
@@ -65,15 +66,13 @@ function startBots(room, count) {
   room.wave = 1;
   room.waveTimer = 40;
   for (let i = 0; i < count; i++) spawnBot(room);
-  // Broadcast initial bots
   io.to(room.code).emit('botState', Array.from(room.bots.values()));
 }
 
-const DT = 0.05; // 50ms tick
+const DT = 0.05;
 function updateBots(room) {
   if (!room.bots || room.status !== 'playing') return;
 
-  // Wave system
   room.waveTimer -= DT;
   if (room.waveTimer <= 0) {
     room.wave++;
@@ -82,7 +81,6 @@ function updateBots(room) {
     io.to(room.code).emit('waveUpdate', { wave: room.wave });
   }
 
-  // Get alive players with known positions
   const players = [];
   room.players.forEach((p, id) => {
     if (p.x !== undefined) players.push({ ...p, socketId: id });
@@ -91,14 +89,12 @@ function updateBots(room) {
   room.bots.forEach((bot) => {
     if (!bot.alive) return;
 
-    // Find nearest player
     let nearest = null, nearDist = Infinity;
     players.forEach(p => {
       const d = Math.sqrt((p.x - bot.x) ** 2 + (p.z - bot.z) ** 2);
       if (d < nearDist) { nearDist = d; nearest = p; }
     });
 
-    // Movement
     bot.roamTimer--;
     if (nearest && nearDist < 60) {
       bot.targetX = nearest.x; bot.targetZ = nearest.z;
@@ -115,7 +111,6 @@ function updateBots(room) {
       bot.rotY = Math.atan2(dx, dz);
     }
 
-    // Shoot nearest player
     bot.shootTimer -= DT;
     if (nearest && nearDist < 45 && bot.shootTimer <= 0) {
       bot.shootTimer = 2 + Math.random() * 2;
@@ -136,7 +131,6 @@ function updateBots(room) {
     }
   });
 
-  // Broadcast bot positions
   io.to(room.code).emit('botState', Array.from(room.bots.values()).filter(b => b.alive));
 }
 
@@ -149,7 +143,7 @@ io.on('connection', (socket) => {
     const room = {
       code, adminId: socket.id,
       players: new Map([[socket.id, { name: name || 'Player', kills: 0, hp: 100 }]]),
-      mode: 'ffa', timeLimit: 10, status: 'lobby',
+      mode: 'ffa', timeLimit: 10, map: 'default', status: 'lobby',
       timer: null, botInterval: null, bots: null, wave: 1, waveTimer: 40
     };
     rooms.set(code, room);
@@ -167,7 +161,7 @@ io.on('connection', (socket) => {
     room.players.set(socket.id, { name: name || 'Player', kills: 0, hp: 100 });
     socket.join(code);
     socket.roomCode = code;
-    socket.emit('roomJoined', { code, players: getRoomPlayers(room), mode: room.mode, timeLimit: room.timeLimit });
+    socket.emit('roomJoined', { code, players: getRoomPlayers(room), mode: room.mode, timeLimit: room.timeLimit, map: room.map });
     broadcastLobby(room);
     console.log(`${name} joined room ${code}`);
   });
@@ -184,6 +178,21 @@ io.on('connection', (socket) => {
     if (!room || room.adminId !== socket.id) return;
     room.timeLimit = timeLimit;
     broadcastLobby(room);
+  });
+
+  socket.on('setMap', ({ map }) => {
+    const room = rooms.get(socket.roomCode);
+    if (!room || room.adminId !== socket.id) return;
+    room.map = map;
+    broadcastLobby(room);
+  });
+
+  socket.on('chatMsg', ({ text }) => {
+    const room = rooms.get(socket.roomCode);
+    if (!room || !text || text.length > 200) return;
+    const p = room.players.get(socket.id);
+    if (!p) return;
+    io.to(room.code).emit('chatMsg', { name: p.name, text: text.trim() });
   });
 
   socket.on('kickPlayer', ({ targetId }) => {
@@ -206,23 +215,32 @@ io.on('connection', (socket) => {
       initialBots.push(...Array.from(room.bots.values()));
       room.botInterval = setInterval(() => updateBots(room), 50);
     }
-    io.to(room.code).emit('gameStart', { mode: room.mode, timeLimit: room.timeLimit, bots: initialBots });
-    console.log(`Room ${room.code} started. Mode: ${room.mode}`);
-    // End game after timeLimit
+    io.to(room.code).emit('gameStart', { mode: room.mode, timeLimit: room.timeLimit, bots: initialBots, map: room.map });
+    console.log(`Room ${room.code} started. Mode: ${room.mode}, Map: ${room.map}`);
+    // End game after timeLimit — reset room to lobby (don't delete)
     room.timer = setTimeout(() => {
       clearInterval(room.botInterval);
+      room.botInterval = null;
       io.to(room.code).emit('gameEnd', { scores: getScores(room) });
-      rooms.delete(room.code);
+      // Reset room to lobby after 10s (players return from game over screen)
+      setTimeout(() => {
+        if (!rooms.has(room.code)) return;
+        room.status = 'lobby';
+        room.bots = new Map();
+        room.wave = 1; room.waveTimer = 40;
+        room.players.forEach(p => { p.kills = 0; p.hp = 100; delete p.x; delete p.y; delete p.z; });
+        broadcastLobby(room);
+      }, 10000);
     }, room.timeLimit * 60 * 1000);
   });
 
-  socket.on('playerMove', ({ x, y, z, rotY }) => {
+  socket.on('playerMove', ({ x, y, z, rotY, currentWeapon }) => {
     const room = rooms.get(socket.roomCode);
     if (!room) return;
     const p = room.players.get(socket.id);
     if (!p) return;
     p.x = x; p.y = y; p.z = z; p.rotY = rotY;
-    socket.to(room.code).emit('playerUpdate', { id: socket.id, name: p.name, x, y, z, rotY, kills: p.kills });
+    socket.to(room.code).emit('playerUpdate', { id: socket.id, name: p.name, x, y, z, rotY, kills: p.kills, currentWeapon });
   });
 
   socket.on('playerHit', ({ targetId, damage }) => {
@@ -253,7 +271,6 @@ io.on('connection', (socket) => {
       const killer = room.players.get(socket.id);
       if (killer) killer.kills++;
       io.to(room.code).emit('botDied', { botId, killerId: socket.id, scores: getScores(room) });
-      // Respawn bot after 4s
       setTimeout(() => {
         if (room.status === 'playing' && room.bots) {
           const newBot = spawnBot(room);

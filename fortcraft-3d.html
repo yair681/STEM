@@ -66,6 +66,24 @@ canvas{display:block;position:fixed;top:0;left:0;}
 .lb-row .pn{flex:1;}
 .lb-row .kl{color:#ff6600;font-weight:bold;}
 #instructions{position:fixed;top:14px;left:14px;color:rgba(255,255,255,.55);font-size:11px;line-height:1.9;pointer-events:none;}
+/* Chat */
+#chatBox{position:fixed;bottom:90px;left:14px;width:290px;z-index:20;pointer-events:none;}
+.chat-msg{background:rgba(0,0,0,.7);color:white;padding:5px 11px;border-radius:8px;font-size:12px;margin-bottom:3px;animation:fadeIn .2s;border-left:3px solid #ffcc00;}
+#chatInput{display:none;position:fixed;bottom:14px;left:14px;width:270px;background:rgba(0,0,0,.88);border:2px solid #ffcc00;border-radius:10px;color:white;font-size:14px;padding:8px 14px;outline:none;z-index:200;pointer-events:auto;}
+/* Lobby chat */
+#lobbyChatWrap{width:390px;margin-top:8px;}
+#lobbyMsgs{width:100%;height:110px;overflow-y:auto;background:rgba(0,0,0,.3);border-radius:10px;padding:8px;margin-bottom:6px;}
+#lobbyChatRow{display:flex;gap:6px;}
+#lobbyChatInp{flex:1;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);border-radius:8px;color:white;padding:7px 12px;font-size:13px;outline:none;}
+#lobbyChatInp:focus{border-color:#ffcc00;}
+/* Map cards */
+.map-card{background:rgba(255,255,255,.05);border:2px solid rgba(255,255,255,.1);border-radius:10px;padding:9px 12px;cursor:pointer;margin:4px;min-width:100px;text-align:center;transition:all .2s;}
+.map-card:hover,.map-card.sel{border-color:#00ccff;background:rgba(0,200,255,.1);}
+.map-card h3{font-size:13px;color:#fff;margin-bottom:2px;}
+.map-card p{font-size:10px;color:#888;}
+/* Non-admin info panel */
+#roomInfoPanel{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:10px 18px;margin:6px 0;font-size:13px;color:#ccc;text-align:right;width:380px;}
+#roomInfoPanel div{margin:3px 0;}
 </style>
 </head>
 <body>
@@ -121,11 +139,32 @@ canvas{display:block;position:fixed;top:0;left:0;}
       <button class="btn sec" style="padding:7px 16px;font-size:13px;" onclick="setTime(20)">20</button>
     </div>
     <div style="margin-top:6px;color:#ffcc00;font-size:13px;">זמן נבחר: <span id="selectedTime">10</span> דקות</div>
+    <div style="margin-top:12px;color:#aaa;font-size:13px;">🗺️ בחר מפה:</div>
+    <div style="display:flex;flex-wrap:wrap;justify-content:center;margin-top:4px;" id="mapCards">
+      <div class="map-card sel" data-map="default" onclick="selectMap('default')"><h3>🌿 ברירת מחדל</h3><p>שדה פתוח</p></div>
+      <div class="map-card" data-map="desert" onclick="selectMap('desert')"><h3>🏜️ מדבר</h3><p>חם ויבש</p></div>
+      <div class="map-card" data-map="arctic" onclick="selectMap('arctic')"><h3>❄️ ארקטי</h3><p>קר ומושלג</p></div>
+      <div class="map-card" data-map="city" onclick="selectMap('city')"><h3>🏙️ עיר</h3><p>סביבה עירונית</p></div>
+    </div>
+  </div>
+  <!-- non-admin view of admin's choices -->
+  <div id="roomInfoPanel" style="display:none;">
+    <div>🎮 מוד: <span id="infoMode">כולם על כולם</span></div>
+    <div>⏱️ זמן: <span id="infoTime">10</span> דקות</div>
+    <div>🗺️ מפה: <span id="infoMap">🌿 ברירת מחדל</span></div>
   </div>
   <div style="color:#aaa;font-size:13px;margin-top:8px;">שחקנים בחדר:</div>
   <div class="player-list" id="playerList"></div>
   <button class="btn" id="startRoomBtn" style="display:none;" onclick="adminStartGame()">▶ התחל משחק</button>
   <div id="waitingMsg" style="color:#888;font-size:14px;display:none;">ממתין למנהל שיתחיל...</div>
+  <!-- Lobby chat -->
+  <div id="lobbyChatWrap">
+    <div id="lobbyMsgs"></div>
+    <div id="lobbyChatRow">
+      <input id="lobbyChatInp" class="inp" style="width:auto;flex:1;font-size:13px;padding:7px 12px;" placeholder="הודעה לחדר..." onkeydown="lobbyChatKey(event)">
+      <button class="btn sec" style="padding:7px 14px;margin:0;" onclick="sendLobbyChat()">📤</button>
+    </div>
+  </div>
   <button class="btn sec" onclick="leaveRoom()" style="margin-top:6px;">יציאה</button>
 </div>
 
@@ -141,7 +180,8 @@ canvas{display:block;position:fixed;top:0;left:0;}
   <h2 id="gameOverTitle">🏆 סיום!</h2>
   <p id="gameOverSub" style="color:#aaa;font-size:18px;margin-bottom:14px;"></p>
   <div class="leaderboard" id="leaderboard"></div>
-  <button class="btn" onclick="location.reload()">▶ שחק שוב</button>
+  <button class="btn" id="playAgainBtn" onclick="location.reload()">▶ שחק שוב</button>
+  <button class="btn sec" id="returnLobbyBtn" style="display:none;" onclick="returnToLobbyFromGame()">🏠 חזור לחדר (<span id="lobbyCountdown">8</span>)</button>
 </div>
 
 <!-- HUD -->
@@ -171,8 +211,10 @@ canvas{display:block;position:fixed;top:0;left:0;}
   <div id="hitFlash"></div>
   <div id="killFeed"></div>
   <div id="scoreboard"><h3>📊 טבלת ניקוד</h3><div id="sbContent"></div></div>
-  <div id="instructions">ESC — פוס (Solo)<br>TAB — ניקוד<br>R — טעינה<br>F — לקחת נשק<br>X — החלף נשק<br>B — בנייה</div>
+  <div id="instructions">ESC — פוס (Solo)<br>TAB — ניקוד<br>R — טעינה<br>F — לקחת נשק<br>X — החלף נשק<br>B — בנייה<br>T — צ'אט (מולטי)</div>
 </div>
+<div id="chatBox"></div>
+<input id="chatInput" placeholder="💬 הודעה... (Enter לשלוח, Esc לסגור)">
 
 <div id="zoomOverlay">
   <div class="scope-circle"></div>
@@ -208,8 +250,24 @@ function randomWeapon(){
   return pool[Math.floor(Math.random()*pool.length)];
 }
 
+// ─── MAPS CONFIG ─────────────────────────────────────────────────────────────
+const MAPS={
+  default:{name:'🌿 ברירת מחדל', sky:0x87CEEB, fog:0x87CEEB, ground:0x4a8c35, fogNear:60, fogFar:220},
+  desert: {name:'🏜️ מדבר',       sky:0xe8c070, fog:0xd4a860, ground:0xc8a040, fogNear:50, fogFar:200},
+  arctic: {name:'❄️ ארקטי',       sky:0xc0e8f8, fog:0xc0e8f8, ground:0xddeef8, fogNear:40, fogFar:160},
+  city:   {name:'🏙️ עיר',         sky:0x7a8c94, fog:0x8a9ca4, ground:0x5a5a6a, fogNear:35, fogFar:150},
+};
+let selectedMap='default';
+function applyMap(m){
+  const map=MAPS[m]||MAPS.default;
+  scene.background=new THREE.Color(map.sky);
+  scene.fog=new THREE.Fog(map.fog,map.fogNear,map.fogFar);
+  ground.material.color.setHex(map.ground);
+}
+
 // ─── GAME STATE ──────────────────────────────────────────────────────────────
 let gameStarted=false, gamePaused=false, gameMode='solo', isSolo=true;
+let chatOpen=false;
 let playerName='Player', myRoomCode='', amAdmin=false;
 let roomGameMode='ffa', roomTimeLimit=10;
 let hp=100, kills=0, wave=1;
@@ -586,16 +644,31 @@ function toggleBuild(){
 const enemies=[];
 function mkEnemy(x,z){
   const g=new THREE.Group();
-  const body=new THREE.Mesh(new THREE.BoxGeometry(.75,1.1,.4),new THREE.MeshLambertMaterial({color:0x9b1c2e}));
-  body.position.y=1.3; body.castShadow=true; g.add(body);
-  const head=new THREE.Mesh(new THREE.BoxGeometry(.55,.55,.55),new THREE.MeshLambertMaterial({color:0xfde68a}));
-  head.position.y=2.15; head.castShadow=true; g.add(head);
+  // Legs
+  const leg1=new THREE.Mesh(new THREE.BoxGeometry(.22,.6,.25),new THREE.MeshLambertMaterial({color:0x3a5220}));
+  leg1.position.set(.18,.3,0); g.add(leg1);
+  const leg2=new THREE.Mesh(new THREE.BoxGeometry(.22,.6,.25),new THREE.MeshLambertMaterial({color:0x3a5220}));
+  leg2.position.set(-.18,.3,0); g.add(leg2);
+  // Body (military olive green)
+  const body=new THREE.Mesh(new THREE.BoxGeometry(.72,1.0,.4),new THREE.MeshLambertMaterial({color:0x4a6830}));
+  body.position.y=1.1; body.castShadow=true; g.add(body);
+  // Belt
+  const belt=new THREE.Mesh(new THREE.BoxGeometry(.75,.1,.42),new THREE.MeshLambertMaterial({color:0x332200}));
+  belt.position.y=.62; g.add(belt);
+  // Head (skin tone)
+  const head=new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.5),new THREE.MeshLambertMaterial({color:0xc9936b}));
+  head.position.y=1.85; head.castShadow=true; g.add(head);
+  // Helmet
+  const helm=new THREE.Mesh(new THREE.BoxGeometry(.6,.26,.6),new THREE.MeshLambertMaterial({color:0x2a3d15}));
+  helm.position.y=2.14; g.add(helm);
+  const brim=new THREE.Mesh(new THREE.BoxGeometry(.74,.07,.74),new THREE.MeshLambertMaterial({color:0x2a3d15}));
+  brim.position.y=1.97; g.add(brim);
   const eGun=new THREE.Mesh(new THREE.BoxGeometry(.08,.08,.4),new THREE.MeshLambertMaterial({color:0x222222}));
-  eGun.position.set(.4,1.2,-.15); eGun.rotation.y=Math.PI/2; g.add(eGun);
+  eGun.position.set(.4,1.1,-.15); eGun.rotation.y=Math.PI/2; g.add(eGun);
   const barBg=new THREE.Mesh(new THREE.PlaneGeometry(1,.12),new THREE.MeshBasicMaterial({color:0x333333,depthTest:false}));
-  barBg.position.y=2.9; g.add(barBg);
+  barBg.position.y=2.65; g.add(barBg);
   const barFill=new THREE.Mesh(new THREE.PlaneGeometry(1,.12),new THREE.MeshBasicMaterial({color:0x00ee44,depthTest:false}));
-  barFill.position.set(-.001,2.901,.001); g.add(barFill);
+  barFill.position.set(-.001,2.651,.001); g.add(barFill);
   const botWeps=['pistol','rifle','shotgun','smg','lmg','rocket','plasma'];
   const wk=botWeps[Math.floor(Math.random()*botWeps.length)];
   const diff=DIFF[difficulty]||DIFF.medium;
@@ -803,6 +876,16 @@ function explosionFX(pos,radius,dmg,fromEnemy){
         if(e.userData.hp<=0) killEnemy(e);
       }
     }
+    // Splash damage to remote players in multiplayer (FFA/TDM)
+    if(socket && roomGameMode!=='coop'){
+      Object.entries(remotePlayerMeshes).forEach(([id,g])=>{
+        const dist=g.position.clone().add(new THREE.Vector3(0,1,0)).distanceTo(pos);
+        if(dist<radius){
+          const d=Math.round(dmg*(1-dist/radius));
+          if(d>0) socket.emit('playerHit',{targetId:id,damage:d});
+        }
+      });
+    }
     // Damage structures (only enemy explosions hurt player's structures)
     if(fromEnemy){
       for(let i=structures.length-1;i>=0;i--){
@@ -857,7 +940,7 @@ function updateProjectiles(dt){
     if(!p.fromEnemy){
       let hit=false;
       for(let j=enemies.length-1;j>=0;j--){
-        if(p.mesh.position.distanceTo(enemies[j].position.clone().add(new THREE.Vector3(0,1.3,0)))<1.4){
+        if(p.mesh.position.distanceTo(enemies[j].position.clone().add(new THREE.Vector3(0,1.1,0)))<1.4){
           const wDef=WEAPONS[p.wk];
           if(wDef?.splash) explosionFX(p.mesh.position.clone(),wDef.splash,wDef.damage,false);
           else{
@@ -866,6 +949,17 @@ function updateProjectiles(dt){
             if(enemies[j].userData.hp<=0) killEnemy(enemies[j]);
           }
           hit=true; break;
+        }
+      }
+      // Hit remote players (FFA/TDM only)
+      if(!hit && socket && roomGameMode!=='coop'){
+        for(const [id,g] of Object.entries(remotePlayerMeshes)){
+          if(p.mesh.position.distanceTo(g.position.clone().add(new THREE.Vector3(0,1.1,0)))<1.4){
+            const wDef=WEAPONS[p.wk];
+            if(wDef?.splash) explosionFX(p.mesh.position.clone(),wDef.splash,wDef.damage,false);
+            else socket.emit('playerHit',{targetId:id,damage:wDef?.damage||30});
+            hit=true; break;
+          }
         }
       }
       if(hit){scene.remove(p.mesh);projectiles.splice(i,1);}
@@ -1124,6 +1218,15 @@ function showGameOver(winnerName){
   document.exitPointerLock();
   document.getElementById('hud').style.display='none';
   document.getElementById('gameOverScreen').style.display='flex';
+  if(!isSolo){
+    document.getElementById('playAgainBtn').style.display='none';
+    document.getElementById('returnLobbyBtn').style.display='block';
+    let cnt=8; document.getElementById('lobbyCountdown').textContent=cnt;
+    const civ=setInterval(()=>{cnt--;document.getElementById('lobbyCountdown').textContent=cnt;if(cnt<=0){clearInterval(civ);returnToLobbyFromGame();}},1000);
+  } else {
+    document.getElementById('playAgainBtn').style.display='block';
+    document.getElementById('returnLobbyBtn').style.display='none';
+  }
   const title=document.getElementById('gameOverTitle');
   const sub=document.getElementById('gameOverSub');
   if(isSolo){
@@ -1148,6 +1251,33 @@ function showGameOver(winnerName){
     row.innerHTML=`<span class="rk">${i+1}</span><span class="pn">${s.name}</span><span class="kl">${s.kills} 💀</span>`;
     lb.appendChild(row);
   });
+}
+
+function cleanupGame(){
+  enemies.forEach(e=>scene.remove(e)); enemies.length=0;
+  Object.keys(remotePlayerMeshes).forEach(id=>removeRemotePlayer(id));
+  Object.keys(roomBotMeshes).forEach(id=>removeBotMesh(id));
+  projectiles.forEach(p=>scene.remove(p.mesh)); projectiles.length=0;
+  particles3d.forEach(p=>scene.remove(p.mesh)); particles3d.length=0;
+  weaponPickups.forEach(p=>{if(p.active)scene.remove(p.mesh);}); weaponPickups.length=0;
+  healthPickups.forEach(p=>{if(p.active)scene.remove(p.mesh);}); healthPickups.length=0;
+  structures.forEach(s=>scene.remove(s)); structures.length=0;
+  lootBoxes.forEach(b=>{if(!b.isOpen)scene.remove(b.mesh);}); lootBoxes.length=0;
+  clearInterval(gameTimerIv); clearInterval(syncIv);
+  document.getElementById('gameTimer').style.display='none';
+  gameTimerLeft=0;
+}
+
+function returnToLobbyFromGame(){
+  cleanupGame();
+  gameStarted=false; kills=0; hp=100; wave=1;
+  playerWeapons={}; wood=50; stone=30;
+  document.getElementById('gameOverScreen').style.display='none';
+  document.getElementById('hud').style.display='none';
+  document.exitPointerLock();
+  // Restore map to default for lobby look
+  applyMap('default');
+  showScreen('lobbyScreen');
 }
 
 // ─── GAME TIMER ──────────────────────────────────────────────────────────────
@@ -1190,6 +1320,8 @@ function backToMenu(){
 document.addEventListener('keydown',e=>{
   keys[e.code]=true;
   if(!gameStarted) return;
+  if(chatOpen) return;
+  if(e.code==='KeyT'){openChatInput();return;}
   if(e.code==='Escape'&&isSolo){if(gamePaused)resumeGame();else pauseGame();return;}
   if(gamePaused) return;
   if(e.code==='Space'&&onGround){playerVel.y=JUMP;onGround=false;}
@@ -1263,16 +1395,26 @@ const roomBotMeshes={}; // server-controlled bots in multiplayer
 
 function createBotMesh(bot){
   const g=new THREE.Group();
-  const body=new THREE.Mesh(new THREE.BoxGeometry(.75,1.1,.4),new THREE.MeshLambertMaterial({color:0x9b1c2e}));
-  body.position.y=1.3; body.castShadow=true; g.add(body);
-  const head=new THREE.Mesh(new THREE.BoxGeometry(.55,.55,.55),new THREE.MeshLambertMaterial({color:0xfde68a}));
-  head.position.y=2.15; head.castShadow=true; g.add(head);
+  const leg1=new THREE.Mesh(new THREE.BoxGeometry(.22,.6,.25),new THREE.MeshLambertMaterial({color:0x3a5220}));
+  leg1.position.set(.18,.3,0); g.add(leg1);
+  const leg2=new THREE.Mesh(new THREE.BoxGeometry(.22,.6,.25),new THREE.MeshLambertMaterial({color:0x3a5220}));
+  leg2.position.set(-.18,.3,0); g.add(leg2);
+  const body=new THREE.Mesh(new THREE.BoxGeometry(.72,1.0,.4),new THREE.MeshLambertMaterial({color:0x4a6830}));
+  body.position.y=1.1; body.castShadow=true; g.add(body);
+  const belt=new THREE.Mesh(new THREE.BoxGeometry(.75,.1,.42),new THREE.MeshLambertMaterial({color:0x332200}));
+  belt.position.y=.62; g.add(belt);
+  const head=new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.5),new THREE.MeshLambertMaterial({color:0xc9936b}));
+  head.position.y=1.85; head.castShadow=true; g.add(head);
+  const helm=new THREE.Mesh(new THREE.BoxGeometry(.6,.26,.6),new THREE.MeshLambertMaterial({color:0x2a3d15}));
+  helm.position.y=2.14; g.add(helm);
+  const brim=new THREE.Mesh(new THREE.BoxGeometry(.74,.07,.74),new THREE.MeshLambertMaterial({color:0x2a3d15}));
+  brim.position.y=1.97; g.add(brim);
   const gun=new THREE.Mesh(new THREE.BoxGeometry(.08,.08,.4),new THREE.MeshLambertMaterial({color:0x222222}));
-  gun.position.set(.4,1.2,-.15); gun.rotation.y=Math.PI/2; g.add(gun);
+  gun.position.set(.4,1.1,-.15); gun.rotation.y=Math.PI/2; g.add(gun);
   const barBg=new THREE.Mesh(new THREE.PlaneGeometry(1,.12),new THREE.MeshBasicMaterial({color:0x333333,depthTest:false}));
-  barBg.position.y=2.9; g.add(barBg);
+  barBg.position.y=2.65; g.add(barBg);
   const barFill=new THREE.Mesh(new THREE.PlaneGeometry(1,.12),new THREE.MeshBasicMaterial({color:0x00ee44,depthTest:false}));
-  barFill.position.set(-.001,2.901,.001); g.add(barFill);
+  barFill.position.set(-.001,2.651,.001); g.add(barFill);
   g.userData={botId:bot.id,barFill};
   g.children.forEach(c=>{if(c.isMesh)c.userData.botId=bot.id;});
   g.position.set(bot.x,0,bot.z);
@@ -1315,18 +1457,26 @@ function connectSocket(){
       showScreen('lobbyScreen');
       updateLobbyPlayers(players);
     });
-    socket.on('lobbyUpdate',({players,mode,timeLimit})=>{
+    socket.on('lobbyUpdate',({players,mode,timeLimit,map})=>{
       updateLobbyPlayers(players);
       if(mode) roomGameMode=mode;
       if(timeLimit) roomTimeLimit=timeLimit;
+      if(map){selectedMap=map;document.querySelectorAll('.map-card').forEach(c=>c.classList.toggle('sel',c.dataset.map===map));}
+      updateRoomInfo();
+      document.getElementById('selectedTime').textContent=roomTimeLimit;
+      document.querySelectorAll('.mode-card').forEach(c=>c.classList.toggle('sel',c.dataset.mode===roomGameMode));
     });
-    socket.on('gameStart',({mode,timeLimit,bots})=>{
+    socket.on('gameStart',({mode,timeLimit,bots,map})=>{
       roomGameMode=mode||'ffa';
       roomTimeLimit=timeLimit||10;
+      if(map) selectedMap=map;
       isSolo=false;
       beginGame();
-      // Init co-op bots from server
       if(bots&&bots.length>0) bots.forEach(b=>createBotMesh(b));
+    });
+    socket.on('chatMsg',({name,text})=>{
+      addChatMessage(name,text);
+      addLobbyChatMsg(name,text);
     });
     socket.on('playerUpdate',(data)=>{
       if(data.id===socket?.id) return;
@@ -1369,7 +1519,7 @@ function connectSocket(){
       if(deadId===socket?.id) handleDeath();
     });
     socket.on('gameEnd',({scores})=>{
-      const sorted=Object.entries(scores).sort((a,b)=>b[1]-a[1]);
+      const sorted=Object.entries(scores).sort((a,b)=>b[1].kills-a[1].kills);
       showGameOver(sorted[0]?.[1]?.name||'?');
     });
     socket.on('kicked',()=>{alert('הוסרת מהחדר על ידי המנהל');location.reload();});
@@ -1389,16 +1539,30 @@ function makeNameLabel(name){
 function updateRemotePlayer(data){
   if(!remotePlayerMeshes[data.id]){
     const g=new THREE.Group();
-    const body=new THREE.Mesh(new THREE.BoxGeometry(.7,1,.4),new THREE.MeshLambertMaterial({color:0x3a7bd5}));
-    body.position.y=.5; g.add(body);
-    const head=new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.5),new THREE.MeshLambertMaterial({color:0xfde68a}));
-    head.position.y=1.25; g.add(head);
+    // Legs
+    const rl1=new THREE.Mesh(new THREE.BoxGeometry(.22,.6,.25),new THREE.MeshLambertMaterial({color:0x1e3c60}));
+    rl1.position.set(.18,.3,0); g.add(rl1);
+    const rl2=new THREE.Mesh(new THREE.BoxGeometry(.22,.6,.25),new THREE.MeshLambertMaterial({color:0x1e3c60}));
+    rl2.position.set(-.18,.3,0); g.add(rl2);
+    // Body (military blue)
+    const body=new THREE.Mesh(new THREE.BoxGeometry(.72,1.0,.4),new THREE.MeshLambertMaterial({color:0x2a5080}));
+    body.position.y=1.1; body.castShadow=true; g.add(body);
+    const rbelt=new THREE.Mesh(new THREE.BoxGeometry(.75,.1,.42),new THREE.MeshLambertMaterial({color:0x332200}));
+    rbelt.position.y=.62; g.add(rbelt);
+    // Head
+    const head=new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.5),new THREE.MeshLambertMaterial({color:0xc9936b}));
+    head.position.y=1.85; g.add(head);
+    // Helmet (dark blue)
+    const rhelm=new THREE.Mesh(new THREE.BoxGeometry(.6,.26,.6),new THREE.MeshLambertMaterial({color:0x1a3a6a}));
+    rhelm.position.y=2.14; g.add(rhelm);
+    const rbrim=new THREE.Mesh(new THREE.BoxGeometry(.74,.07,.74),new THREE.MeshLambertMaterial({color:0x1a3a6a}));
+    rbrim.position.y=1.97; g.add(rbrim);
     // Name label
     const label=makeNameLabel(data.name||'Player');
-    label.position.y=2.2; g.add(label);
+    label.position.y=2.55; g.add(label);
     // Weapon indicator
     const wInd=new THREE.Mesh(new THREE.BoxGeometry(.08,.08,.3),new THREE.MeshLambertMaterial({color:0x222222}));
-    wInd.position.set(.4,.8,-.1); wInd.rotation.y=Math.PI/2; g.add(wInd);
+    wInd.position.set(.4,1.1,-.1); wInd.rotation.y=Math.PI/2; g.add(wInd);
     g.userData={wInd,label};
     g.position.set(data.x,0,data.z);
     scene.add(g);
@@ -1463,6 +1627,68 @@ function leaveRoom(){
   socket?.emit('leaveRoom');
   showScreen('startScreen');
 }
+function selectMap(m){
+  selectedMap=m;
+  document.querySelectorAll('.map-card').forEach(c=>c.classList.toggle('sel',c.dataset.map===m));
+  socket?.emit('setMap',{map:m});
+}
+const MODE_NAMES={ffa:'⚔️ כולם על כולם',coop:'🤝 קואופ vs AI',tdm:'🔵🔴 קבוצות',gun:'🔫 Gun Game'};
+function updateRoomInfo(){
+  const panel=document.getElementById('roomInfoPanel');
+  if(!amAdmin&&panel){
+    panel.style.display='block';
+    document.getElementById('infoMode').textContent=MODE_NAMES[roomGameMode]||roomGameMode;
+    document.getElementById('infoTime').textContent=roomTimeLimit;
+    document.getElementById('infoMap').textContent=MAPS[selectedMap]?.name||selectedMap;
+  }
+}
+
+// ─── CHAT ────────────────────────────────────────────────────────────────────
+function addChatMessage(name,text){
+  const box=document.getElementById('chatBox');
+  const el=document.createElement('div');
+  el.className='chat-msg';
+  el.innerHTML=`<b>${name}:</b> ${text}`;
+  box.appendChild(el);
+  while(box.children.length>8) box.removeChild(box.children[0]);
+  setTimeout(()=>{el.style.transition='opacity 1s';el.style.opacity='0';setTimeout(()=>el.remove(),1000);},5000);
+}
+function addLobbyChatMsg(name,text){
+  const el=document.getElementById('lobbyMsgs');
+  if(!el) return;
+  const div=document.createElement('div');
+  div.style.cssText='color:white;font-size:12px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.07)';
+  div.innerHTML=`<b style="color:#ffcc00">${name}:</b> ${text}`;
+  el.appendChild(div); el.scrollTop=el.scrollHeight;
+}
+function lobbyChatKey(e){if(e.key==='Enter')sendLobbyChat();}
+function sendLobbyChat(){
+  const inp=document.getElementById('lobbyChatInp');
+  const txt=inp.value.trim(); if(!txt) return;
+  socket?.emit('chatMsg',{text:txt}); inp.value='';
+}
+function openChatInput(){
+  if(isSolo||!socket) return;
+  chatOpen=true;
+  document.exitPointerLock();
+  const ci=document.getElementById('chatInput');
+  ci.style.display='block'; ci.focus();
+}
+function closeChatInput(){
+  chatOpen=false;
+  const ci=document.getElementById('chatInput');
+  ci.style.display='none'; ci.value='';
+  if(gameStarted) renderer.domElement.requestPointerLock();
+}
+document.getElementById('chatInput').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){
+    const txt=document.getElementById('chatInput').value.trim();
+    if(txt) socket?.emit('chatMsg',{text:txt});
+    closeChatInput();
+  }
+  if(e.key==='Escape') closeChatInput();
+  e.stopPropagation();
+});
 
 // ─── NAVIGATION ──────────────────────────────────────────────────────────────
 function showScreen(id){
@@ -1504,6 +1730,7 @@ function confirmName(){
 
 // ─── BEGIN GAME ───────────────────────────────────────────────────────────────
 function beginGame(){
+  applyMap(selectedMap);
   showScreen('startScreen');
   document.getElementById('startScreen').style.display='none';
   document.getElementById('hud').style.display='block';
