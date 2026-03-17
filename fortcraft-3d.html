@@ -317,6 +317,9 @@ const MAPS={
 };
 let selectedMap='default';
 const mapObjects=[];
+// Houses
+const houses=[];
+const houseMeshes=[];
 function applyMap(m){
   const map=MAPS[m]||MAPS.default;
   scene.background=new THREE.Color(map.sky);
@@ -410,7 +413,7 @@ const GUN_GAME_SEQ=['pistol','smg','rifle','shotgun','lmg','sniper','plasma','ro
 // Car system
 const cars=[];
 let inCar=false, currentCar=null;
-let nearCar=null, nearShop=null;
+let nearCar=null, nearShop=null, nearHouse=null;
 let taxiDriving=false, taxiDest=null;
 // Shop system
 const shopMeshes=[];
@@ -733,10 +736,20 @@ function checkPickupNearby(){
   for(const s of shopMeshes){
     if(s.pos.distanceTo(playerPos)<3.5){nearShop=s;break;}
   }
-  // Determine prompt priority: shop > car > pickup
+  // Check house proximity (door entrance: front center)
+  nearHouse=null;
+  for(const h of houses){
+    const doorX=h.pos.x, doorZ=h.pos.z-h.D/2;
+    const d=Math.sqrt((playerPos.x-doorX)**2+(playerPos.z-doorZ)**2);
+    if(d<3.5){nearHouse=h;break;}
+  }
+  // Determine prompt priority: shop > house > car > pickup
   if(nearShop){
     el.style.display='block';
     el.textContent='🛒 E לחנות';
+  } else if(nearHouse){
+    el.style.display='block';
+    el.textContent=nearHouse.owned?'🏠 הבית שלך':'🏠 E לקנות בית ('+nearHouse.price+' 💰)';
   } else if(nearCar){
     el.style.display='block';
     el.textContent='🚗 E להיכנס למכונית';
@@ -1551,6 +1564,9 @@ function cleanupGame(){
   shopMeshes.forEach(s=>{scene.remove(s.mesh);scene.remove(s.light);}); shopMeshes.length=0;
   // Roads
   roadObjects.forEach(o=>scene.remove(o)); roadObjects.length=0;
+  // Houses
+  houseMeshes.forEach(m=>scene.remove(m)); houseMeshes.length=0;
+  houses.length=0; nearHouse=null;
   money=0;
   // Restore tree visibility
   envObjects.forEach(o=>{if(o.userData.isTree)o.visible=true;o.traverse(c=>{if(c.isMesh&&c.geometry.type==='ConeGeometry')c.material.color.setHex(0x2d7a1e);});});
@@ -1627,6 +1643,7 @@ document.addEventListener('keydown',e=>{
   if(e.code==='KeyE'){
     // Priority: shop first, then car
     if(nearShop&&!shopOpen){openShop();return;}
+    if(nearHouse){buyHouse(nearHouse);return;}
     if(nearCar||inCar){enterExitCar();return;}
   }
   if(e.code==='KeyG') throwHandGrenade();
@@ -2402,6 +2419,106 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
 });
 
+// ─── HOUSE SYSTEM ────────────────────────────────────────────────────────────
+function mkHouse(x, z, price){
+  const W=10, D=10, H=5, TH=0.4, doorW=2.4, doorH=3.2;
+  const wallMat=new THREE.MeshLambertMaterial({color:0xd4c4a8});
+  const roofMat=new THREE.MeshLambertMaterial({color:0x8b3333});
+  const floorMat=new THREE.MeshLambertMaterial({color:0xb0a080});
+  const frameMat=new THREE.MeshLambertMaterial({color:0x553300});
+
+  function wall(wx,wy,wz,ww,wh,wd){
+    const m=new THREE.Mesh(new THREE.BoxGeometry(ww,wh,wd),wallMat);
+    m.position.set(x+wx,wy,z+wz);
+    m.castShadow=true; m.receiveShadow=true;
+    m.userData={isMapObj:true,w:ww,h:wh,d:wd};
+    scene.add(m); mapObjects.push(m); houseMeshes.push(m);
+  }
+
+  // 4 walls (back, left, right, front split for door)
+  wall(0, H/2, D/2, W, H, TH);              // back
+  wall(-W/2, H/2, 0, TH, H, D);             // left
+  wall(W/2, H/2, 0, TH, H, D);              // right
+  const fw=(W-doorW)/2;
+  wall(-(doorW/2+fw/2), H/2, -D/2, fw, H, TH);   // front-left
+  wall(doorW/2+fw/2, H/2, -D/2, fw, H, TH);        // front-right
+  wall(0, doorH+(H-doorH)/2, -D/2, doorW, H-doorH, TH); // lintel
+
+  // Floor (walkable inside)
+  const floor=new THREE.Mesh(new THREE.BoxGeometry(W-TH*2,0.12,D-TH*2),floorMat);
+  floor.position.set(x,0.06,z); floor.receiveShadow=true;
+  floor.userData={isMapObj:true,w:W-TH*2,h:0.12,d:D-TH*2};
+  scene.add(floor); mapObjects.push(floor); houseMeshes.push(floor);
+
+  // Roof slab
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(W+0.6,0.35,D+0.6),roofMat);
+  roof.position.set(x,H+0.18,z); roof.castShadow=true;
+  scene.add(roof); houseMeshes.push(roof);
+  // Peaked roof
+  const peak=new THREE.Mesh(new THREE.CylinderGeometry(0,W*0.68,2.2,4),roofMat);
+  peak.rotation.y=Math.PI/4; peak.position.set(x,H+1.4,z); peak.castShadow=true;
+  scene.add(peak); houseMeshes.push(peak);
+
+  // Door frame
+  const df=new THREE.Mesh(new THREE.BoxGeometry(doorW+0.3,doorH,0.15),frameMat);
+  df.position.set(x,doorH/2,z-D/2-0.05); scene.add(df); houseMeshes.push(df);
+
+  // "For Sale" sign (sprite label)
+  const cv=document.createElement('canvas'); cv.width=256; cv.height=80;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle='rgba(255,220,50,0.92)'; ctx.roundRect(4,4,248,72,12); ctx.fill();
+  ctx.fillStyle='#222'; ctx.font='bold 26px Arial'; ctx.textAlign='center';
+  ctx.fillText('🏠 למכירה',128,32);
+  ctx.font='20px Arial'; ctx.fillText('💰 '+price,128,62);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv),transparent:true,depthTest:false}));
+  sp.scale.set(4,1.25,1); sp.position.set(x,H+4,z-D/2+0.5);
+  scene.add(sp); houseMeshes.push(sp);
+
+  const light=new THREE.PointLight(0xffeecc,1.2,14);
+  light.position.set(x,H+1,z); scene.add(light); houseMeshes.push(light);
+
+  const house={
+    pos:new THREE.Vector3(x,0,z), W, D, H, doorW,
+    owned:false, price, label:sp, labelCanvas:cv, labelCtx:ctx, light
+  };
+  houses.push(house);
+  return house;
+}
+
+function buyHouse(house){
+  if(house.owned){flashHUD('🏠 הבית שלך!');return;}
+  if(money<house.price){flashHUD('אין מספיק כסף! ('+house.price+' 💰)');return;}
+  money-=house.price;
+  document.getElementById('moneyNum').textContent=money;
+  house.owned=true;
+  // Update sign to "Mine"
+  const ctx=house.labelCtx, cv=house.labelCanvas;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.fillStyle='rgba(50,200,80,0.92)'; ctx.roundRect(4,4,248,72,12); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 26px Arial'; ctx.textAlign='center';
+  ctx.fillText('🏠 הבית שלי',128,32);
+  ctx.font='18px Arial'; ctx.fillText('✅ נרכש',128,60);
+  house.label.material.map=new THREE.CanvasTexture(cv);
+  house.label.material.needsUpdate=true;
+  house.light.color.setHex(0x88ffaa);
+  flashHUD('🏠 קנית את הבית! +100 HP מקסימום');
+  earnMoney(0); // refresh display
+  // Bonus: heal to full
+  hp=Math.min(100,hp+50); updateHUD();
+  unlockAchievement&&unlockAchievement('rich');
+}
+
+function spawnHouses(){
+  houses.length=0;
+  houseMeshes.forEach(m=>scene.remove(m)); houseMeshes.length=0;
+  const spots=[
+    {x:-40,z:-40,p:400},{x:40,z:-40,p:500},{x:-40,z:40,p:450},
+    {x:40,z:40,p:550},{x:0,z:-80,p:600},{x:-80,z:0,p:350},
+    {x:80,z:0,p:650},{x:0,z:80,p:500}
+  ];
+  spots.forEach(s=>mkHouse(s.x,s.z,s.p));
+}
+
 // ─── SHOP SYSTEM ─────────────────────────────────────────────────────────────
 function mkShop(x,z){
   const g=new THREE.Group();
@@ -2502,7 +2619,7 @@ function beginGame(){
   // Init new state
   money=0; killStreak=0; speedBoostTimer=0;
   handGrenades=3; handGrenadeRechargeTimer=0;
-  gunGameIdx=0; inCar=false; currentCar=null; nearCar=null; nearShop=null; taxiDriving=false; taxiDest=null;
+  gunGameIdx=0; inCar=false; currentCar=null; nearCar=null; nearShop=null; nearHouse=null; taxiDriving=false; taxiDest=null;
   achievementsUnlocked={}; sniperKillCount=0; buildCount=0; firstBloodDone=false;
   document.getElementById('moneyNum').textContent=0;
   document.getElementById('grenadeCount').textContent=3;
@@ -2518,6 +2635,8 @@ function beginGame(){
   updateHUD();
   // Roads
   addRoads();
+  // Houses
+  spawnHouses();
   // Spawn cars at road intersections
   const carColors=[0xff2222,0x2255ff,0xffcc00,0xffffff,0xff8800,0x22aa22];
   const carSpots=[{x:0,z:-70},{x:70,z:0},{x:-70,z:0},{x:0,z:70},{x:70,z:-70},{x:-70,z:70}];
