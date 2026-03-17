@@ -893,7 +893,7 @@ const remotePlayerMeshes={};
 
 function connectSocket(){
   try{
-    socket=io('http://localhost:3000');
+    socket=io(window.location.origin);
     socket.on('connect',()=>console.log('Connected to server'));
     socket.on('connect_error',()=>{console.warn('Server offline, solo only');socket=null;});
     socket.on('roomCreated',({code})=>{
