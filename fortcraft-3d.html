@@ -102,6 +102,14 @@ canvas{display:block;position:fixed;top:0;left:0;}
 /* Earn money text */
 .earn-float{position:fixed;font-size:18px;font-weight:900;color:#00ff88;text-shadow:0 0 6px #00cc55;pointer-events:none;z-index:300;animation:earnAnim 1.6s forwards;}
 @keyframes earnAnim{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-60px)}}
+/* Hotel & Apartment overlays */
+#hotelOverlay,#apartOverlay{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.93);border:2px solid #ffcc00;border-radius:16px;padding:24px;z-index:400;color:white;min-width:360px;max-width:480px;max-height:80vh;overflow-y:auto;}
+#hotelOverlay h3,#apartOverlay h3{color:#ffcc00;text-align:center;margin-bottom:14px;font-size:20px;}
+.room-btn{font-size:13px;padding:9px 12px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.2);border-radius:8px;color:white;cursor:pointer;text-align:center;transition:background .15s;width:100%;display:block;margin-bottom:6px;}
+.room-btn:hover{background:rgba(255,200,0,.18);border-color:#ffcc00;}
+.room-btn.owned{border-color:#22cc66;background:rgba(34,200,100,.12);cursor:default;}
+.room-btn.rented{border-color:#00aaff;background:rgba(0,150,255,.12);cursor:default;}
+#hotelTimerHUD{display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.8);color:#00aaff;padding:7px 22px;border-radius:20px;font-size:15px;font-weight:bold;border:1px solid #00aaff;pointer-events:none;z-index:50;}
 </style>
 </head>
 <body>
@@ -201,6 +209,23 @@ canvas{display:block;position:fixed;top:0;left:0;}
   <button class="btn sec" onclick="backToMenu()" style="margin-top:8px;">🏠 תפריט ראשי</button>
 </div>
 
+<!-- HOTEL OVERLAY -->
+<div id="hotelOverlay">
+  <h3>🏨 בית מלון</h3>
+  <div id="hotelRoomList" style="margin-bottom:12px;"></div>
+  <div style="text-align:center;color:#aaa;font-size:12px;">ESC לסגור</div>
+</div>
+
+<!-- APARTMENT OVERLAY -->
+<div id="apartOverlay">
+  <h3 id="apartBuildingTitle">🏢 בניין דירות</h3>
+  <div id="apartFloorList" style="margin-bottom:12px;"></div>
+  <div style="text-align:center;color:#aaa;font-size:12px;">ESC לסגור</div>
+</div>
+
+<!-- HOTEL TIMER HUD -->
+<div id="hotelTimerHUD">🏨 חדר מלון: <span id="hotelTimerNum">00:00</span></div>
+
 <!-- SHOP OVERLAY -->
 <div id="shopOverlay">
   <h3 style="color:#ffcc00;text-align:center;margin-bottom:16px;">🛒 חנות נשקים</h3>
@@ -255,7 +280,7 @@ canvas{display:block;position:fixed;top:0;left:0;}
   <div id="hitFlash"></div>
   <div id="killFeed"></div>
   <div id="scoreboard"><h3>📊 טבלת ניקוד</h3><div id="sbContent"></div></div>
-  <div id="instructions">ESC — פוס (Solo)<br>TAB — ניקוד<br>R — טעינה<br>F — לקחת נשק<br>X — החלף נשק<br>B — בנייה<br>T — צ'אט<br>Shift — ריצה<br>E — רכב/חנות<br>G — רימון<br>Z — אמוג'י</div>
+  <div id="instructions">ESC — פוס (Solo)<br>TAB — ניקוד<br>R — טעינה<br>F — לקחת נשק<br>X — החלף נשק<br>B — בנייה<br>T — צ'אט<br>Shift — ריצה<br>E — רכב/חנות/דלת<br>E — 🏢 דירה / 🏨 מלון<br>G — רימון<br>Z — אמוג'י</div>
   <div id="carHUD" style="display:none;position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:white;padding:10px 26px;border-radius:14px;font-size:15px;border:2px solid #ffcc00;text-align:center;">
     🚗 <b id="carSpeedNum">0</b> קמ"ש &nbsp;|&nbsp; <span style="color:#aaa;font-size:12px;">W/S נסיעה &nbsp; עכבר היגוי &nbsp; E לצאת</span>
     &nbsp;|&nbsp; <span id="taxiStatus" style="color:#ffdd88;font-size:12px;"></span>
@@ -414,6 +439,21 @@ const GUN_GAME_SEQ=['pistol','smg','rifle','shotgun','lmg','sniper','plasma','ro
 const cars=[];
 let inCar=false, currentCar=null;
 let nearCar=null, nearShop=null, nearHouse=null;
+// Door system
+const allDoors=[];
+let nearDoor=null;
+// Elevator system
+const elevators=[];
+// Apartment buildings
+const apartBuildings=[];
+let nearApartBuilding=null;
+let apartOpen=false;
+// Hotel
+let hotelBuilding=null;
+let nearHotel=null;
+let hotelOpen=false;
+let playerHotelRoomIdx=-1;
+let hotelTimeLeft=0;
 let taxiDriving=false, taxiDest=null;
 // Shop system
 const shopMeshes=[];
@@ -743,13 +783,45 @@ function checkPickupNearby(){
     const d=Math.sqrt((playerPos.x-doorX)**2+(playerPos.z-doorZ)**2);
     if(d<3.5){nearHouse=h;break;}
   }
-  // Determine prompt priority: shop > house > car > pickup
-  if(nearShop){
+  // Check door proximity (house doors - for toggling)
+  nearDoor=null;
+  for(const d of allDoors){
+    if(!d.pivot) continue;
+    const pp=d.pivot.position;
+    const dx2=pp.x-playerPos.x, dz2=pp.z-playerPos.z;
+    if(Math.sqrt(dx2*dx2+dz2*dz2)<2.8){nearDoor=d;break;}
+  }
+  // Check apartment building proximity
+  nearApartBuilding=null;
+  for(const b of apartBuildings){
+    const dx=Math.abs(playerPos.x-b.x), dz=Math.abs(playerPos.z-(b.z-b.bd/2));
+    if(dx<3.5&&dz<3.5){nearApartBuilding=b;break;}
+  }
+  // Check hotel proximity
+  nearHotel=null;
+  if(hotelBuilding){
+    const dx=Math.abs(playerPos.x-hotelBuilding.x), dz=Math.abs(playerPos.z-(hotelBuilding.z-hotelBuilding.bd/2));
+    if(dx<4&&dz<4) nearHotel=hotelBuilding;
+  }
+  // Determine prompt priority: hotel > apartment > shop > house > door > car > pickup
+  if(nearHotel){
+    el.style.display='block';
+    el.textContent='🏨 E להזמנת חדר מלון';
+  } else if(nearApartBuilding){
+    el.style.display='block';
+    el.textContent='🏢 E לקנות דירה';
+  } else if(nearShop){
     el.style.display='block';
     el.textContent='🛒 E לחנות';
-  } else if(nearHouse){
+  } else if(nearHouse&&!nearHouse.owned){
     el.style.display='block';
-    el.textContent=nearHouse.owned?'🏠 הבית שלך':'🏠 E לקנות בית ('+nearHouse.price+' 💰)';
+    el.textContent='🏠 E לקנות בית ('+nearHouse.price+' 💰)';
+  } else if(nearHouse&&nearHouse.owned){
+    el.style.display='block';
+    el.textContent='🏠 '+( nearHouse.door?.open?'E לסגור דלת':'E לפתוח דלת');
+  } else if(nearDoor&&!nearHouse){
+    el.style.display='block';
+    el.textContent=nearDoor.open?'🚪 E לסגור דלת':'🚪 E לפתוח דלת';
   } else if(nearCar){
     el.style.display='block';
     el.textContent='🚗 E להיכנס למכונית';
@@ -1366,6 +1438,14 @@ function updatePlayer(dt){
   structures.forEach(s=>{
     if(s.userData.isStruct){const dx=Math.abs(playerPos.x-s.position.x),dz=Math.abs(playerPos.z-s.position.z);if(dx<2&&dz<2&&playerPos.y>s.position.y)floorY=Math.max(floorY,s.position.y+CELL/2);}
   });
+  // Elevator platforms as floors (handled in updateElevators but also here for gravity)
+  elevators.forEach(el=>{
+    const dx=Math.abs(playerPos.x-el.x), dz=Math.abs(playerPos.z-el.z);
+    const platTop=el.mesh.position.y+0.09;
+    if(dx<1.1&&dz<1.1&&playerPos.y>=platTop+1.6&&playerPos.y<platTop+2.2){
+      floorY=Math.max(floorY,platTop);
+    }
+  });
   // Floor/collision from map objects (buildings etc.)
   mapObjects.forEach(s=>{
     const hw=s.userData.w/2+0.4, hd=s.userData.d/2+0.4;
@@ -1567,6 +1647,21 @@ function cleanupGame(){
   // Houses
   houseMeshes.forEach(m=>scene.remove(m)); houseMeshes.length=0;
   houses.length=0; nearHouse=null;
+  // Apartment buildings
+  apartMeshes.forEach(m=>scene.remove(m)); apartMeshes.length=0;
+  apartBuildings.length=0; nearApartBuilding=null; apartOpen=false;
+  // Hotel
+  hotelMeshes.forEach(m=>scene.remove(m)); hotelMeshes.length=0;
+  hotelBuilding=null; nearHotel=null; hotelOpen=false;
+  playerHotelRoomIdx=-1; hotelTimeLeft=0;
+  document.getElementById('hotelTimerHUD').style.display='none';
+  document.getElementById('hotelOverlay').style.display='none';
+  document.getElementById('apartOverlay').style.display='none';
+  // Elevators
+  elevators.forEach(e=>scene.remove(e.mesh)); elevators.length=0;
+  // Doors
+  allDoors.forEach(d=>{if(d.pivot)scene.remove(d.pivot);}); allDoors.length=0;
+  nearDoor=null;
   money=0;
   // Restore tree visibility
   envObjects.forEach(o=>{if(o.userData.isTree)o.visible=true;o.traverse(c=>{if(c.isMesh&&c.geometry.type==='ConeGeometry')c.material.color.setHex(0x2d7a1e);});});
@@ -1630,6 +1725,8 @@ document.addEventListener('keydown',e=>{
   if(chatOpen) return;
   if(e.code==='KeyT'){openChatInput();return;}
   if(e.code==='Escape'){
+    if(hotelOpen){closeHotelOverlay();return;}
+    if(apartOpen){closeApartOverlay();return;}
     if(shopOpen){closeShop();return;}
     if(isSolo){if(gamePaused)resumeGame();else pauseGame();return;}
   }
@@ -1641,9 +1738,17 @@ document.addEventListener('keydown',e=>{
   if(e.code==='KeyX') switchWeapon();
   if(e.code==='KeyR') reload();
   if(e.code==='KeyE'){
-    // Priority: shop first, then car
+    // Priority: hotel > apartment > shop > house > door > car
+    if(nearHotel&&!hotelOpen){openHotelOverlay();return;}
+    if(nearApartBuilding&&!apartOpen){openApartOverlay(nearApartBuilding);return;}
     if(nearShop&&!shopOpen){openShop();return;}
-    if(nearHouse){buyHouse(nearHouse);return;}
+    if(nearHouse&&!nearHouse.owned){buyHouse(nearHouse);return;}
+    if(nearHouse&&nearHouse.owned){
+      // Toggle house door
+      if(nearHouse.door) toggleDoor(nearHouse.door);
+      return;
+    }
+    if(nearDoor&&!nearHouse){toggleDoor(nearDoor);return;}
     if(nearCar||inCar){enterExitCar();return;}
   }
   if(e.code==='KeyG') throwHandGrenade();
@@ -2463,6 +2568,21 @@ function mkHouse(x, z, price){
   const df=new THREE.Mesh(new THREE.BoxGeometry(doorW+0.3,doorH,0.15),frameMat);
   df.position.set(x,doorH/2,z-D/2-0.05); scene.add(df); houseMeshes.push(df);
 
+  // Door mesh (pivot trick: rotate around left hinge)
+  const doorPivot=new THREE.Group();
+  doorPivot.position.set(x-doorW/2+0.04, 0, z-D/2);
+  scene.add(doorPivot); houseMeshes.push(doorPivot);
+  const doorPanel=new THREE.Mesh(
+    new THREE.BoxGeometry(doorW-0.08, doorH-0.1, 0.1),
+    new THREE.MeshLambertMaterial({color:0x8B5E3C})
+  );
+  doorPanel.position.set(doorW/2, doorH/2, 0);
+  doorPanel.castShadow=true;
+  doorPivot.add(doorPanel);
+  const doorObj={pivot:doorPivot,open:false,targetRot:0,currentRot:0,houseRef:null};
+  allDoors.push(doorObj);
+  houseMeshes.push(doorPanel);
+
   // "For Sale" sign (sprite label)
   const cv=document.createElement('canvas'); cv.width=256; cv.height=80;
   const ctx=cv.getContext('2d');
@@ -2479,8 +2599,10 @@ function mkHouse(x, z, price){
 
   const house={
     pos:new THREE.Vector3(x,0,z), W, D, H, doorW,
-    owned:false, price, label:sp, labelCanvas:cv, labelCtx:ctx, light
+    owned:false, price, label:sp, labelCanvas:cv, labelCtx:ctx, light,
+    door:doorObj
   };
+  doorObj.houseRef=house;
   houses.push(house);
   return house;
 }
@@ -2508,7 +2630,334 @@ function buyHouse(house){
   unlockAchievement&&unlockAchievement('rich');
 }
 
+// ─── DOOR SYSTEM ─────────────────────────────────────────────────────────────
+function toggleDoor(doorObj){
+  doorObj.open=!doorObj.open;
+  doorObj.targetRot=doorObj.open?-Math.PI/2:0;
+}
+function updateDoors(dt){
+  allDoors.forEach(d=>{
+    if(Math.abs(d.currentRot-d.targetRot)>0.01){
+      const speed=3.5;
+      const diff=d.targetRot-d.currentRot;
+      d.currentRot+=Math.sign(diff)*Math.min(Math.abs(diff),speed*dt);
+      d.pivot.rotation.y=d.currentRot;
+    }
+  });
+}
+
+// ─── ELEVATOR SYSTEM ─────────────────────────────────────────────────────────
+function mkElevator(x,z,minY,maxY,col){
+  const mat=new THREE.MeshLambertMaterial({color:col||0x888888,emissive:col||0x888888,emissiveIntensity:0.12});
+  const plat=new THREE.Mesh(new THREE.BoxGeometry(2.2,0.18,2.2),mat);
+  plat.position.set(x,minY+0.09,z);
+  plat.castShadow=true; plat.receiveShadow=true;
+  // Arrow indicator on top
+  const arrow=new THREE.Mesh(new THREE.BoxGeometry(0.15,0.4,0.15),new THREE.MeshLambertMaterial({color:0xffcc00,emissive:0xffcc00,emissiveIntensity:0.8}));
+  arrow.position.set(0,0.29,0); plat.add(arrow);
+  scene.add(plat);
+  const el={mesh:plat,x,z,minY:minY+0.09,maxY:maxY-0.5,speed:2.5,dir:1,carrying:false};
+  elevators.push(el);
+  return el;
+}
+
+function updateElevators(dt){
+  elevators.forEach(el=>{
+    el.mesh.position.y+=el.speed*el.dir*dt;
+    if(el.mesh.position.y>=el.maxY){el.mesh.position.y=el.maxY;el.dir=-1;}
+    if(el.mesh.position.y<=el.minY){el.mesh.position.y=el.minY;el.dir=1;}
+    // Carry player
+    const dx=Math.abs(playerPos.x-el.x), dz=Math.abs(playerPos.z-el.z);
+    const platTop=el.mesh.position.y+0.09;
+    if(dx<1.1&&dz<1.1&&playerPos.y>=platTop&&playerPos.y<=platTop+0.55){
+      playerPos.y=platTop+1.8;
+      playerVel.y=0; onGround=true;
+      el.carrying=true;
+    } else el.carrying=false;
+  });
+}
+
+// ─── APARTMENT BUILDINGS ──────────────────────────────────────────────────────
+const apartMeshes=[];
+function mkApartBuilding(x,z,nFloors,bw,bd){
+  const col=0x556677;
+  const floorH=3.8;
+  const totalH=nFloors*floorH;
+  const buildMat=new THREE.MeshLambertMaterial({color:col});
+  const winMat=new THREE.MeshLambertMaterial({color:0x88ccff,transparent:true,opacity:0.6});
+  const g=new THREE.Group();
+  // Main structure: 4 outer walls as meshes
+  const wallT=0.3;
+  function addWall(wx,wy,wz,ww,wh,wd){
+    const m=new THREE.Mesh(new THREE.BoxGeometry(ww,wh,wd),buildMat.clone());
+    m.position.set(wx,wy,wz);
+    m.castShadow=true; m.receiveShadow=true;
+    m.userData={isMapObj:true,w:ww,h:wh,d:wd};
+    g.add(m); scene.add(m);
+    mapObjects.push(m); apartMeshes.push(m);
+  }
+  // Back wall
+  addWall(x, totalH/2, z+bd/2, bw, totalH, wallT);
+  // Left wall
+  addWall(x-bw/2, totalH/2, z, wallT, totalH, bd);
+  // Right wall
+  addWall(x+bw/2, totalH/2, z, wallT, totalH, bd);
+  // Front wall split for door (ground floor door 2.2 wide, 3.2 tall)
+  const doorW=2.2, doorH=3.2;
+  const sideW=(bw-doorW)/2;
+  addWall(x-doorW/2-sideW/2, totalH/2, z-bd/2, sideW, totalH, wallT);
+  addWall(x+doorW/2+sideW/2, totalH/2, z-bd/2, sideW, totalH, wallT);
+  addWall(x, doorH+(totalH-doorH)/2, z-bd/2, doorW, totalH-doorH, wallT); // lintel
+  // Floor slabs for each floor
+  for(let f=0;f<nFloors;f++){
+    const fl=new THREE.Mesh(new THREE.BoxGeometry(bw-wallT*2,0.15,bd-wallT*2),new THREE.MeshLambertMaterial({color:0x778899}));
+    fl.position.set(x,f*floorH,z); fl.receiveShadow=true;
+    scene.add(fl); apartMeshes.push(fl);
+  }
+  // Roof slab
+  const roofSlab=new THREE.Mesh(new THREE.BoxGeometry(bw+0.4,0.25,bd+0.4),buildMat.clone());
+  roofSlab.position.set(x,totalH+0.125,z); roofSlab.castShadow=true;
+  scene.add(roofSlab); apartMeshes.push(roofSlab);
+  // Windows on each floor
+  for(let f=0;f<nFloors;f++){
+    for(let col2=0;col2<3;col2++){
+      const win=new THREE.Mesh(new THREE.BoxGeometry(0.8,1.1,0.08),winMat.clone());
+      win.position.set(x-bw/2+0.5+col2*2.4, f*floorH+2, z-bd/2-0.05);
+      scene.add(win); apartMeshes.push(win);
+    }
+  }
+  // Door pivot
+  const dPivot=new THREE.Group();
+  dPivot.position.set(x-doorW/2+0.04, 0, z-bd/2);
+  scene.add(dPivot); apartMeshes.push(dPivot);
+  const dPanel=new THREE.Mesh(
+    new THREE.BoxGeometry(doorW-0.1, doorH-0.12, 0.1),
+    new THREE.MeshLambertMaterial({color:0x6a4830})
+  );
+  dPanel.position.set(doorW/2, doorH/2, 0);
+  dPanel.castShadow=true; dPivot.add(dPanel);
+  const dObj={pivot:dPivot,open:false,targetRot:0,currentRot:0};
+  allDoors.push(dObj);
+  // Interior point light
+  const iLight=new THREE.PointLight(0xffeedd,0.8,bw*1.5);
+  iLight.position.set(x,2,z); scene.add(iLight); apartMeshes.push(iLight);
+  // Elevator inside building
+  const elev=mkElevator(x,z+1,0,totalH,0x778899);
+  // Sign
+  const cv2=document.createElement('canvas'); cv2.width=256; cv2.height=80;
+  const ctx2=cv2.getContext('2d');
+  ctx2.fillStyle='rgba(80,100,140,0.92)'; ctx2.roundRect(4,4,248,72,12); ctx2.fill();
+  ctx2.fillStyle='#fff'; ctx2.font='bold 24px Arial'; ctx2.textAlign='center';
+  ctx2.fillText('🏢 דירות למכירה',128,32);
+  ctx2.font='16px Arial'; ctx2.fillStyle='#ffcc00';
+  ctx2.fillText(`${nFloors} קומות | לחץ E`,128,62);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv2),transparent:true,depthTest:false}));
+  sp.scale.set(5,1.56,1); sp.position.set(x,totalH+3,z);
+  scene.add(sp); apartMeshes.push(sp);
+  // Build apartments data
+  const apts=[];
+  for(let f=0;f<nFloors;f++){
+    apts.push({floor:f,price:500+f*300,owned:false,ownerName:''});
+  }
+  const bld={x,z,bw,bd,nFloors,floorH,totalH,apts,sign:sp,signCanvas:cv2,signCtx:ctx2,door:dObj};
+  apartBuildings.push(bld);
+  return bld;
+}
+
+function openApartOverlay(bld){
+  apartOpen=true;
+  document.exitPointerLock();
+  document.getElementById('apartBuildingTitle').textContent='🏢 בניין - '+bld.nFloors+' קומות';
+  const list=document.getElementById('apartFloorList');
+  list.innerHTML='';
+  bld.apts.forEach((apt,i)=>{
+    const btn=document.createElement('button');
+    btn.className='room-btn'+(apt.owned?' owned':'');
+    if(apt.owned){
+      btn.textContent=`קומה ${apt.floor+1} — 🏠 שלך (${apt.ownerName||playerName})`;
+    } else {
+      btn.textContent=`קומה ${apt.floor+1} — ${apt.price} 💰 לרכישה`;
+      btn.onclick=()=>buyApartment(bld,i);
+    }
+    list.appendChild(btn);
+  });
+  document.getElementById('apartOverlay').style.display='block';
+}
+
+function buyApartment(bld,idx){
+  const apt=bld.apts[idx];
+  if(apt.owned){flashHUD('הדירה כבר נמכרה!');return;}
+  if(money<apt.price){flashHUD(`אין מספיק כסף! צריך ${apt.price} 💰`);return;}
+  money-=apt.price;
+  document.getElementById('moneyNum').textContent=money;
+  apt.owned=true; apt.ownerName=playerName;
+  hp=Math.min(100,hp+30); updateHUD();
+  flashHUD(`🏢 קנית דירה בקומה ${apt.floor+1}! +30 HP`);
+  openApartOverlay(bld); // refresh
+}
+
+function closeApartOverlay(){
+  apartOpen=false;
+  document.getElementById('apartOverlay').style.display='none';
+  if(gameStarted) renderer.domElement.requestPointerLock();
+}
+
+// ─── HOTEL SYSTEM ─────────────────────────────────────────────────────────────
+const hotelMeshes=[];
+const HOTEL_ROOMS=[
+  {name:'חדר סטנדרטי',duration:60,price:300,heal:20},
+  {name:'חדר דלוקס',duration:180,price:700,heal:50},
+  {name:'סוויטה',duration:360,price:1500,heal:100},
+];
+
+function mkHotel(x,z){
+  const bw=14, bd=12, nFloors=5, floorH=3.8;
+  const totalH=nFloors*floorH;
+  const wallT=0.3;
+  const buildMat=new THREE.MeshLambertMaterial({color:0x997755});
+  const winMat=new THREE.MeshLambertMaterial({color:0xffeecc,transparent:true,opacity:0.65});
+  function addHWall(wx,wy,wz,ww,wh,wd){
+    const m=new THREE.Mesh(new THREE.BoxGeometry(ww,wh,wd),buildMat.clone());
+    m.position.set(wx,wy,wz); m.castShadow=true; m.receiveShadow=true;
+    m.userData={isMapObj:true,w:ww,h:wh,d:wd};
+    scene.add(m); mapObjects.push(m); hotelMeshes.push(m);
+  }
+  addHWall(x, totalH/2, z+bd/2, bw, totalH, wallT);
+  addHWall(x-bw/2, totalH/2, z, wallT, totalH, bd);
+  addHWall(x+bw/2, totalH/2, z, wallT, totalH, bd);
+  // Front with large entrance (4 wide)
+  const entrW=4, entrH=4.5;
+  const sideW=(bw-entrW)/2;
+  addHWall(x-entrW/2-sideW/2, totalH/2, z-bd/2, sideW, totalH, wallT);
+  addHWall(x+entrW/2+sideW/2, totalH/2, z-bd/2, sideW, totalH, wallT);
+  addHWall(x, entrH+(totalH-entrH)/2, z-bd/2, entrW, totalH-entrH, wallT);
+  // Floor slabs
+  for(let f=0;f<nFloors;f++){
+    const fl=new THREE.Mesh(new THREE.BoxGeometry(bw-wallT*2,0.15,bd-wallT*2),new THREE.MeshLambertMaterial({color:0xaa9977}));
+    fl.position.set(x,f*floorH,z); fl.receiveShadow=true;
+    scene.add(fl); hotelMeshes.push(fl);
+  }
+  // Roof
+  const roofSlab=new THREE.Mesh(new THREE.BoxGeometry(bw+0.5,0.3,bd+0.5),buildMat.clone());
+  roofSlab.position.set(x,totalH+0.15,z); roofSlab.castShadow=true;
+  scene.add(roofSlab); hotelMeshes.push(roofSlab);
+  // Roof decorative spire
+  const spire=new THREE.Mesh(new THREE.CylinderGeometry(0,1.2,4,4),buildMat.clone());
+  spire.position.set(x,totalH+2.3,z); spire.castShadow=true;
+  scene.add(spire); hotelMeshes.push(spire);
+  // Windows
+  for(let f=0;f<nFloors;f++){
+    for(let c=-2;c<=2;c++){
+      if(f===0&&Math.abs(c)<1) continue; // ground floor entrance
+      const win=new THREE.Mesh(new THREE.BoxGeometry(1.0,1.4,0.08),winMat.clone());
+      win.position.set(x+c*2.4, f*floorH+2.1, z-bd/2-0.05);
+      scene.add(win); hotelMeshes.push(win);
+    }
+  }
+  // Door pivot
+  const dPivot=new THREE.Group();
+  dPivot.position.set(x-entrW/2+0.05, 0, z-bd/2);
+  scene.add(dPivot); hotelMeshes.push(dPivot);
+  const dPanel=new THREE.Mesh(
+    new THREE.BoxGeometry(entrW-0.1, entrH-0.15, 0.1),
+    new THREE.MeshLambertMaterial({color:0x7a5c3a})
+  );
+  dPanel.position.set(entrW/2, entrH/2, 0); dPanel.castShadow=true; dPivot.add(dPanel);
+  const dObj={pivot:dPivot,open:false,targetRot:0,currentRot:0};
+  allDoors.push(dObj);
+  // Reception desk inside
+  const desk=new THREE.Mesh(new THREE.BoxGeometry(4,1.1,1.2),new THREE.MeshLambertMaterial({color:0x885533}));
+  desk.position.set(x,0.55,z+2); desk.castShadow=true;
+  scene.add(desk); hotelMeshes.push(desk);
+  // Elevator
+  mkElevator(x-3,z+1,0,totalH,0xaa9977);
+  // Warm lighting
+  const lobbyLight=new THREE.PointLight(0xffddaa,2,bw*1.5);
+  lobbyLight.position.set(x,3,z); scene.add(lobbyLight); hotelMeshes.push(lobbyLight);
+  // Hotel sign
+  const cv3=document.createElement('canvas'); cv3.width=320; cv3.height=100;
+  const ctx3=cv3.getContext('2d');
+  ctx3.fillStyle='rgba(180,120,40,0.95)'; ctx3.roundRect(4,4,312,92,16); ctx3.fill();
+  ctx3.fillStyle='#fff8dc'; ctx3.font='bold 30px Arial'; ctx3.textAlign='center';
+  ctx3.fillText('🏨 GRAND HOTEL',160,38);
+  ctx3.font='18px Arial'; ctx3.fillStyle='#ffee88';
+  ctx3.fillText('לחץ E להזמנת חדר',160,76);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv3),transparent:true,depthTest:false}));
+  sp.scale.set(7,2.2,1); sp.position.set(x,totalH+4,z);
+  scene.add(sp); hotelMeshes.push(sp);
+  // Neon light
+  const neon=new THREE.PointLight(0xffaa33,4,30);
+  neon.position.set(x,totalH+1,z-bd/2-1); scene.add(neon); hotelMeshes.push(neon);
+  hotelBuilding={x,z,bw,bd,nFloors,floorH,totalH,door:dObj,rooms:HOTEL_ROOMS.map(r=>({...r,occupied:false}))};
+  return hotelBuilding;
+}
+
+function openHotelOverlay(){
+  hotelOpen=true;
+  document.exitPointerLock();
+  const list=document.getElementById('hotelRoomList');
+  list.innerHTML='';
+  if(playerHotelRoomIdx>=0){
+    const info=document.createElement('div');
+    info.style.cssText='background:rgba(0,150,255,.15);border:1px solid #00aaff;border-radius:8px;padding:10px;margin-bottom:12px;text-align:center;color:#00aaff;';
+    const mins=Math.floor(hotelTimeLeft/60), secs=hotelTimeLeft%60;
+    info.innerHTML=`🏨 חדר פעיל: ${hotelBuilding.rooms[playerHotelRoomIdx].name}<br>זמן שנותר: ${mins}:${String(secs).padStart(2,'0')}`;
+    list.appendChild(info);
+  }
+  hotelBuilding.rooms.forEach((room,i)=>{
+    const btn=document.createElement('button');
+    const active=(playerHotelRoomIdx===i);
+    btn.className='room-btn'+(active?' rented':'');
+    const durMin=Math.floor(room.duration/60);
+    btn.innerHTML=`${room.name}<br><span style="color:#ffcc00">${room.price} 💰</span> — ${durMin} דקות — ❤️ +${room.heal} HP`;
+    if(!active) btn.onclick=()=>rentHotelRoom(i);
+    else btn.textContent+=' (פעיל)';
+    list.appendChild(btn);
+  });
+  document.getElementById('hotelOverlay').style.display='block';
+}
+
+function rentHotelRoom(idx){
+  const room=hotelBuilding.rooms[idx];
+  if(money<room.price){flashHUD(`אין מספיק כסף! צריך ${room.price} 💰`);return;}
+  if(playerHotelRoomIdx>=0){flashHUD('כבר יש לך חדר פעיל!');return;}
+  money-=room.price;
+  document.getElementById('moneyNum').textContent=money;
+  playerHotelRoomIdx=idx;
+  hotelTimeLeft=room.duration;
+  hp=Math.min(100,hp+room.heal); updateHUD();
+  document.getElementById('hotelTimerHUD').style.display='block';
+  flashHUD(`🏨 שכרת ${room.name}! +${room.heal} HP`);
+  closeHotelOverlay();
+}
+
+function closeHotelOverlay(){
+  hotelOpen=false;
+  document.getElementById('hotelOverlay').style.display='none';
+  if(gameStarted) renderer.domElement.requestPointerLock();
+}
+
+function updateHotel(dt){
+  if(playerHotelRoomIdx<0) return;
+  hotelTimeLeft=Math.max(0,hotelTimeLeft-dt);
+  const mins=Math.floor(hotelTimeLeft/60), secs=Math.floor(hotelTimeLeft%60);
+  document.getElementById('hotelTimerNum').textContent=`${mins}:${String(secs).padStart(2,'0')}`;
+  // Slow heal while in hotel area
+  if(hotelBuilding&&Math.abs(playerPos.x-hotelBuilding.x)<hotelBuilding.bw/2+2&&Math.abs(playerPos.z-hotelBuilding.z)<hotelBuilding.bd/2+2){
+    hp=Math.min(100,hp+dt*3); updateHUD();
+  }
+  if(hotelTimeLeft<=0){
+    playerHotelRoomIdx=-1;
+    document.getElementById('hotelTimerHUD').style.display='none';
+    flashHUD('🏨 זמן החדר פג!');
+  }
+}
+
 function spawnHouses(){
+  // Clear all doors first
+  allDoors.forEach(d=>{if(d.pivot)scene.remove(d.pivot);}); allDoors.length=0;
+  // Clear elevators
+  elevators.forEach(e=>scene.remove(e.mesh)); elevators.length=0;
   houses.length=0;
   houseMeshes.forEach(m=>scene.remove(m)); houseMeshes.length=0;
   const spots=[
@@ -2517,6 +2966,16 @@ function spawnHouses(){
     {x:80,z:0,p:650},{x:0,z:80,p:500}
   ];
   spots.forEach(s=>mkHouse(s.x,s.z,s.p));
+  // Apartment buildings
+  apartBuildings.length=0;
+  apartMeshes.forEach(m=>scene.remove(m)); apartMeshes.length=0;
+  mkApartBuilding(-60,-60,4,12,10);
+  mkApartBuilding(60,60,5,12,10);
+  mkApartBuilding(-60,60,3,12,10);
+  // Hotel
+  hotelMeshes.forEach(m=>scene.remove(m)); hotelMeshes.length=0;
+  hotelBuilding=null;
+  mkHotel(60,-60);
 }
 
 // ─── SHOP SYSTEM ─────────────────────────────────────────────────────────────
@@ -2679,6 +3138,9 @@ function loop(t){
   if(gameStarted&&!gamePaused){
     updatePlayer(dt);
     updateCars(dt);
+    updateDoors(dt);
+    updateElevators(dt);
+    updateHotel(dt);
     if(isSolo) updateEnemies(dt);
     updateGhost();
     updateParticles(dt);
