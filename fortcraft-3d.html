@@ -3133,7 +3133,6 @@ function mkApartBuilding(x,z,nFloors,bw,bd){
   apartBuildings.push(bld);
   // ── Elevator call button panels on each floor ──
   const callBtns=[];
-  const elevX=x+bw/2-2, elevZ=z;
   for(let f=0;f<nFloors;f++){
     // Panel box on wall to the left of elevator shaft
     const panel=new THREE.Mesh(new THREE.BoxGeometry(0.28,0.42,0.1),
@@ -3157,7 +3156,7 @@ function mkApartBuilding(x,z,nFloors,bw,bd){
     scene.add(led); apartMeshes.push(led);
     callBtns.push({floor:f,panel,led});
   }
-  bld.callBtns=callBtns;
+  bld.callBtns=callBtns; bld.callBtnElev=elev;
   elev.callBtns=callBtns;
   // ── Apartment doors on interior back wall (one per floor) ──
   for(let f=0;f<nFloors;f++) addApartDoor(bld,f);
