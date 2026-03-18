@@ -2639,24 +2639,38 @@ function fireTankCannon(){
   shell.position.copy(origin); scene.add(shell);
   screenShake(0.05); flashHUD('💥 פגז נורה!');
   // Animate shell
-  let dist=0;
+  let dist=0, shellDone=false;
   const spd=60;
   const shellInterval=setInterval(()=>{
+    if(shellDone) return;
     dist+=spd*0.016;
     shell.position.add(dir.clone().multiplyScalar(spd*0.016));
-    // Check enemy hits
-    enemies.forEach(e=>{
-      const d=e.position.distanceTo(shell.position);
-      if(d<3){
+    // Check enemy hits (reverse loop — safe with killEnemy splice)
+    for(let i=enemies.length-1;i>=0;i--){
+      const e=enemies[i];
+      if(e.position.distanceTo(shell.position)<3){
+        shellDone=true;
         const dmg=80+Math.floor(Math.random()*40);
         e.userData.hp=Math.max(0,e.userData.hp-dmg);
         e.userData.provoked=true;
         updateEnemyHP(e);
         if(e.userData.hp<=0) killEnemy(e);
+        // AOE splash to nearby enemies
+        for(let j=enemies.length-1;j>=0;j--){
+          const e2=enemies[j];
+          if(e2.position.distanceTo(shell.position)<6){
+            e2.userData.hp=Math.max(0,e2.userData.hp-40);
+            e2.userData.provoked=true;
+            updateEnemyHP(e2);
+            if(e2.userData.hp<=0) killEnemy(e2);
+          }
+        }
+        screenShake(0.08);
         clearInterval(shellInterval); scene.remove(shell);
+        return;
       }
-    });
-    if(dist>300){clearInterval(shellInterval); scene.remove(shell);}
+    }
+    if(dist>300){shellDone=true; clearInterval(shellInterval); scene.remove(shell);}
   },16);
 }
 
@@ -3928,10 +3942,10 @@ function beginGame(){
   const carColors=[0xff2222,0x2255ff,0xffcc00,0xffffff,0xff8800,0x22aa22];
   const carSpots=[{x:0,z:-100},{x:100,z:0},{x:-100,z:0},{x:0,z:100},{x:100,z:-100},{x:-100,z:100},{x:150,z:50},{x:-150,z:-50}];
   carSpots.forEach((s,i)=>mkCar(s.x,s.z,carColors[i%carColors.length]));
-  // Spawn tanks
-  [{x:150,z:150},{x:-150,z:150},{x:150,z:-150},{x:-150,z:-150}].forEach(s=>mkTank(s.x,s.z));
-  // Spawn helicopters
-  [{x:200,z:0},{x:-200,z:0},{x:0,z:200}].forEach(s=>mkHelicopter(s.x,s.z));
+  // Spawn tanks (close enough to find on foot)
+  [{x:25,z:25},{x:-25,z:25},{x:25,z:-25},{x:-25,z:-25}].forEach(s=>mkTank(s.x,s.z));
+  // Spawn helicopters (slightly further but findable)
+  [{x:50,z:0},{x:-50,z:0},{x:0,z:50}].forEach(s=>mkHelicopter(s.x,s.z));
   // Spawn shops
   [[-35,-35],[35,35],[-35,35]].forEach(([x,z])=>mkShop(x,z));
   // Scatter weapon crates
