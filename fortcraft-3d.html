@@ -326,6 +326,12 @@ canvas{display:block;position:fixed;top:0;left:0;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>
+window.onerror=function(msg,src,line,col,err){
+  const d=document.createElement('div');
+  d.style.cssText='position:fixed;top:0;left:0;right:0;background:#cc0000;color:white;padding:12px;font-size:14px;z-index:9999;font-family:monospace;';
+  d.textContent='JS ERROR: '+msg+' (line '+line+')';
+  document.body.appendChild(d);
+};
 // ─── WEAPONS CONFIG ─────────────────────────────────────────────────────────
 const WEAPONS = {
   pistol:  {name:'אקדח',        ammo:12,  reserve:60,  damage:30,  fireRate:350,  auto:false, zoom:2.0, color:0x888888},
