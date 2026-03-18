@@ -243,6 +243,7 @@ canvas{display:block;position:fixed;top:0;left:0;}
 
 <!-- FLOOR HUD (shows when inside building) -->
 <div id="floorHUD">🏢 קומה <span id="floorNum">1</span></div>
+<div id="botModeHUD" style="display:none;position:fixed;bottom:60px;right:18px;background:rgba(0,0,0,.75);color:white;padding:6px 14px;border-radius:10px;font-size:13px;border:1px solid rgba(255,255,255,.2);cursor:pointer;z-index:20;" onclick="toggleBotMode()">🤖 בוטים: אגרסיביים</div>
 
 <!-- SHOP OVERLAY -->
 <div id="shopOverlay">
@@ -426,6 +427,12 @@ function spawnMapScenery(m){
 
 // ─── GAME STATE ──────────────────────────────────────────────────────────────
 let gameStarted=false, gamePaused=false, gameMode='solo', isSolo=true;
+let botPassive=false; // true = bots only attack if provoked
+const tanks=[];
+let inTank=false, currentTank=null, nearTank=null;
+const helicopters=[];
+let inHeli=false, currentHeli=null, nearHeli=null;
+let heliRotorAngle=0;
 let chatOpen=false, isRespawning=false;
 let playerName='Player', myRoomCode='', amAdmin=false;
 let roomGameMode='ffa', roomTimeLimit=10;
@@ -517,7 +524,7 @@ sun.shadow.camera.left=-120; sun.shadow.camera.right=120;
 sun.shadow.camera.top=120; sun.shadow.camera.bottom=-120;
 scene.add(sun);
 
-const ground=new THREE.Mesh(new THREE.PlaneGeometry(500,500,60,60),new THREE.MeshLambertMaterial({color:0x4a8c35}));
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(1000,1000,80,80),new THREE.MeshLambertMaterial({color:0x4a8c35}));
 ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
 const grid=new THREE.GridHelper(500,100,0x000000,0x000000);
 grid.material.opacity=0.06; grid.material.transparent=true; scene.add(grid);
@@ -877,6 +884,12 @@ function checkPickupNearby(){
   } else if(nearDoor&&!nearHouse){
     el.style.display='block';
     el.textContent=nearDoor.open?'🚪 E לסגור דלת':'🚪 E לפתוח דלת';
+  } else if(nearTank){
+    el.style.display='block';
+    el.textContent='🪖 E להיכנס לטנק';
+  } else if(nearHeli){
+    el.style.display='block';
+    el.textContent='🚁 E להיכנס למסוק';
   } else if(nearCar){
     el.style.display='block';
     el.textContent='🚗 E להיכנס למכונית';
@@ -1006,7 +1019,7 @@ function mkEnemy(x,z){
   scene.add(g); enemies.push(g); return g;
 }
 function spawnEnemies(n){
-  for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,d=40+Math.random()*60;mkEnemy(Math.cos(a)*d,Math.sin(a)*d);}
+  for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,d=40+Math.random()*310;mkEnemy(Math.cos(a)*d,Math.sin(a)*d);}
 }
 function updateEnemyHP(e){
   const pct=Math.max(0,e.userData.hp/e.userData.maxHp);
@@ -1031,7 +1044,7 @@ function killEnemy(e){
   if(currentWeaponKey==='sniper'){sniperKillCount++;if(sniperKillCount>=3)unlockAchievement('sniper3');}
   // Gun game
   gunGameOnKill();
-  setTimeout(()=>{if(enemies.length<10)mkEnemy((Math.random()-.5)*160,(Math.random()-.5)*160);},4000);
+  setTimeout(()=>{if(enemies.length<10)mkEnemy((Math.random()-.5)*380,(Math.random()-.5)*380);},4000);
 }
 function updateEnemies(dt){
   const diff=DIFF[difficulty]||DIFF.medium;
@@ -1055,7 +1068,7 @@ function updateEnemies(dt){
 
     // Cover-seeking: when taking damage move toward nearest obstacle
     e.userData.coverTimer=(e.userData.coverTimer||0)-dt;
-    if(dist>5){
+    if(dist>5&&(!botPassive||e.userData.provoked)){
       let tx=playerPos.x, tz=playerPos.z;
       // If hurt recently, dodge sideways
       if(e.userData.dodging){
@@ -1074,7 +1087,7 @@ function updateEnemies(dt){
     e.userData.shootTimer-=dt;
     if(e.userData.shootTimer<=0&&dist<50){
       e.userData.shootTimer=(2+Math.random()*2)/diff.enemyAccMult;
-      enemyFire(e,dist);
+      if(!botPassive||e.userData.provoked) enemyFire(e,dist);
     }
   });
 }
@@ -1416,6 +1429,7 @@ function shoot(){
       if(hitE){
         const dmg=WEAPONS[currentWeaponKey].damage+Math.floor(Math.random()*10);
         hitE.userData.hp-=dmg; updateEnemyHP(hitE);
+        hitE.userData.provoked=true;
         spawnText(h.point,`-${dmg}`,'#ff4444');
         if(hitE.userData.hp<=0) killEnemy(hitE);
       }
@@ -1467,7 +1481,7 @@ function reload(){
 const GRAVITY=-22,JUMP=9,SPD=10,SPD_SPRINT=17;
 let headBobT=0;
 function updatePlayer(dt){
-  if(inCar) return; // car physics handled in updateCars
+  if(inCar||inTank||inHeli) return; // vehicle physics handled separately
   const fwd=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
   const rgt=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
   const move=new THREE.Vector3();
@@ -1694,6 +1708,10 @@ function cleanupGame(){
   // Cars
   cars.forEach(c=>scene.remove(c.mesh)); cars.length=0;
   inCar=false; currentCar=null;
+  tanks.forEach(t=>scene.remove(t.mesh)); tanks.length=0;
+  inTank=false; currentTank=null; nearTank=null;
+  helicopters.forEach(h=>scene.remove(h.mesh)); helicopters.length=0;
+  inHeli=false; currentHeli=null; nearHeli=null;
   // Hand grenades
   handGrenadeProjectiles.forEach(g=>scene.remove(g.mesh)); handGrenadeProjectiles.length=0;
   // Shops
@@ -1719,6 +1737,8 @@ function cleanupGame(){
   allDoors.forEach(d=>{if(d.pivot)scene.remove(d.pivot);}); allDoors.length=0;
   nearDoor=null;
   money=0;
+  document.getElementById('botModeHUD').style.display='none';
+  botPassive=false;
   // Restore tree visibility
   envObjects.forEach(o=>{if(o.userData.isTree)o.visible=true;o.traverse(c=>{if(c.isMesh&&c.geometry.type==='ConeGeometry')c.material.color.setHex(0x2d7a1e);});});
   clearInterval(gameTimerIv); clearInterval(syncIv);
@@ -1836,6 +1856,8 @@ document.addEventListener('keydown',e=>{
       return;
     }
     if(nearDoor&&!nearHouse){toggleDoor(nearDoor);return;}
+    if(inTank||nearTank){enterExitTank();return;}
+    if(inHeli||nearHeli){enterExitHeli();return;}
     if(nearCar||inCar){enterExitCar();return;}
   }
   if(e.code==='KeyG') throwHandGrenade();
@@ -1860,6 +1882,7 @@ document.addEventListener('mousemove',e=>{
 });
 document.addEventListener('mousedown',e=>{
   if(!gameStarted||gamePaused) return;
+  if(inTank&&e.button===0){fireTankCannon();return;}
   if(e.button===0){
     if(buildMode) placeBuild();
     else{
@@ -2423,6 +2446,220 @@ function addRoads(){
   });
 }
 
+// ─── HELICOPTER SYSTEM ───────────────────────────────────────────────────────
+function mkHelicopter(x,z){
+  const g=new THREE.Group();
+  const bodyMat=new THREE.MeshLambertMaterial({color:0x334488});
+  const darkMat=new THREE.MeshLambertMaterial({color:0x222233});
+  const glassMat=new THREE.MeshLambertMaterial({color:0x88ccff,transparent:true,opacity:0.5});
+  const metalMat=new THREE.MeshLambertMaterial({color:0x778899});
+  // Main body (fuselage)
+  const body=new THREE.Mesh(new THREE.BoxGeometry(2.2,1.2,4.5),bodyMat);
+  body.position.y=0; body.castShadow=true; g.add(body);
+  // Nose (glass cockpit)
+  const nose=new THREE.Mesh(new THREE.BoxGeometry(1.8,1.0,1.2),glassMat);
+  nose.position.set(0,0,-2.7); g.add(nose);
+  // Tail boom (thin and long)
+  const tail=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.5,3.5),bodyMat);
+  tail.position.set(0,0.2,3.8); tail.castShadow=true; g.add(tail);
+  // Tail fin
+  const fin=new THREE.Mesh(new THREE.BoxGeometry(0.1,1.2,1.0),darkMat);
+  fin.position.set(0,0.8,5.2); g.add(fin);
+  // Skids (landing gear)
+  [-0.8,0.8].forEach(ox=>{
+    const skid=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.12,4.2),metalMat);
+    skid.position.set(ox,-0.8,0); g.add(skid);
+    [-1.5,1.5].forEach(oz=>{
+      const strut=new THREE.Mesh(new THREE.BoxGeometry(0.1,0.8,0.1),metalMat);
+      strut.position.set(ox,-0.4,oz); g.add(strut);
+    });
+  });
+  // Main rotor hub
+  const rotorHub=new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.18,0.3,8),metalMat);
+  rotorHub.position.set(0,0.9,0); g.add(rotorHub);
+  // Main rotor blades (stored for animation)
+  const rotorGroup=new THREE.Group();
+  rotorGroup.position.set(0,0.9,0);
+  [-1,1].forEach(side=>{
+    const blade=new THREE.Mesh(new THREE.BoxGeometry(5.5,0.06,0.35),darkMat);
+    blade.position.x=side*2.75; rotorGroup.add(blade);
+  });
+  g.add(rotorGroup);
+  // Tail rotor
+  const tailRotor=new THREE.Group();
+  tailRotor.position.set(0.38,0.7,5.5);
+  [-1,1].forEach(side=>{
+    const tb=new THREE.Mesh(new THREE.BoxGeometry(0.06,1.1,0.2),darkMat);
+    tb.position.y=side*0.55; tailRotor.add(tb);
+  });
+  g.add(tailRotor);
+  // Nose light
+  const nLight=new THREE.PointLight(0xffffcc,0.8,20);
+  nLight.position.set(0,0,-2.5); g.add(nLight);
+  g.position.set(x,0.8,z);
+  scene.add(g);
+  const heli={mesh:g,rotorGroup,tailRotor,nLight,pos:new THREE.Vector3(x,0.8,z),rot:0,vel:0,velY:0,occupied:false,id:helicopters.length};
+  helicopters.push(heli); return heli;
+}
+
+function updateHelicopters(dt){
+  // Spin all rotors for visual effect
+  heliRotorAngle+=dt*8;
+  helicopters.forEach(h=>{
+    h.rotorGroup.rotation.y=heliRotorAngle;
+    h.tailRotor.rotation.x=heliRotorAngle*3;
+  });
+  // Proximity detection
+  nearHeli=null;
+  if(!inHeli){
+    for(const h of helicopters){
+      if(!h.occupied&&h.pos.distanceTo(playerPos)<5){nearHeli=h;break;}
+    }
+  }
+  if(!inHeli||!currentHeli) return;
+  const heli=currentHeli;
+  // Steer yaw with mouse
+  const steerD=yaw-heli.rot;
+  const sn=Math.atan2(Math.sin(steerD),Math.cos(steerD));
+  heli.rot+=sn*dt*3;
+  // Horizontal movement
+  const fwdSpd=22, fric=8;
+  if(keys['KeyW']||keys['ArrowUp']) heli.vel=Math.min(fwdSpd,heli.vel+12*dt);
+  else if(keys['KeyS']||keys['ArrowDown']) heli.vel=Math.max(-10,heli.vel-12*dt);
+  else{heli.vel+=(heli.vel>0?-1:heli.vel<0?1:0)*fric*dt; if(Math.abs(heli.vel)<0.1)heli.vel=0;}
+  // Vertical movement: Space=up, Ctrl/ShiftLeft=down
+  const upSpd=12;
+  if(keys['Space']) heli.velY=Math.min(upSpd,heli.velY+10*dt);
+  else if(keys['ControlLeft']||keys['ShiftLeft']) heli.velY=Math.max(-8,heli.velY-10*dt);
+  else{heli.velY*=Math.max(0,1-dt*4);}
+  // Apply movement
+  heli.pos.x+=Math.sin(-heli.rot)*heli.vel*dt;
+  heli.pos.z+=Math.cos(-heli.rot)*heli.vel*dt;
+  heli.pos.y=Math.max(0.8,heli.pos.y+heli.velY*dt);
+  heli.pos.x=Math.max(-490,Math.min(490,heli.pos.x));
+  heli.pos.z=Math.max(-490,Math.min(490,heli.pos.z));
+  heli.mesh.position.copy(heli.pos);
+  heli.mesh.rotation.y=heli.rot;
+  // Tilt slightly in direction of travel
+  heli.mesh.rotation.x=heli.vel*0.018;
+  playerPos.set(heli.pos.x,heli.pos.y+1.5,heli.pos.z);
+  camera.position.copy(playerPos);
+  camera.rotation.order='YXZ'; camera.rotation.y=yaw; camera.rotation.x=pitch;
+}
+
+// ─── TANK SYSTEM ─────────────────────────────────────────────────────────────
+function mkTank(x,z){
+  const g=new THREE.Group();
+  const bodyMat=new THREE.MeshLambertMaterial({color:0x4a5e2a});
+  const darkMat=new THREE.MeshLambertMaterial({color:0x2a3318});
+  const metalMat=new THREE.MeshLambertMaterial({color:0x888877});
+  // Hull (wide low box)
+  const hull=new THREE.Mesh(new THREE.BoxGeometry(3.8,0.9,5.2),bodyMat);
+  hull.position.y=0.85; hull.castShadow=true; g.add(hull);
+  // Tracks (left and right)
+  [-1.9,1.9].forEach(ox=>{
+    const track=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.7,5.4),darkMat);
+    track.position.set(ox,0.65,0); track.castShadow=true; g.add(track);
+    // Track wheels
+    for(let i=-2;i<=2;i++){
+      const wh=new THREE.Mesh(new THREE.CylinderGeometry(0.32,0.32,0.22,8),metalMat);
+      wh.rotation.z=Math.PI/2; wh.position.set(ox,0.55,i*1.1); g.add(wh);
+    }
+  });
+  // Turret base
+  const tBase=new THREE.Mesh(new THREE.CylinderGeometry(1.0,1.1,0.5,12),bodyMat);
+  tBase.position.set(0,1.55,0.3); tBase.castShadow=true; g.add(tBase);
+  // Turret top
+  const turret=new THREE.Group();
+  turret.position.set(0,1.8,0.3);
+  const tTop=new THREE.Mesh(new THREE.BoxGeometry(1.8,0.55,2.0),bodyMat);
+  tTop.position.y=0.28; tTop.castShadow=true; turret.add(tTop);
+  // Cannon barrel
+  const barrel=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.15,3.5,8),darkMat);
+  barrel.rotation.x=Math.PI/2; barrel.position.set(0,0.3,-2.2); turret.add(barrel);
+  const barrelTip=new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.12,0.4,8),metalMat);
+  barrelTip.rotation.x=Math.PI/2; barrelTip.position.set(0,0.3,-3.95); turret.add(barrelTip);
+  g.add(turret);
+  g.position.set(x,0,z);
+  scene.add(g);
+  const tank={mesh:g,turret,pos:new THREE.Vector3(x,0,z),rot:0,turretRot:0,vel:0,occupied:false,shootTimer:0,id:tanks.length};
+  tanks.push(tank); return tank;
+}
+
+function updateTanks(dt){
+  // Update nearTank detection
+  nearTank=null;
+  if(!inTank){
+    for(const t of tanks){
+      if(!t.occupied&&t.pos.distanceTo(playerPos)<5){nearTank=t;break;}
+    }
+  }
+  if(!inTank||!currentTank) return;
+  const tank=currentTank;
+  tank.shootTimer=Math.max(0,tank.shootTimer-dt);
+  // Steer hull with yaw
+  const steerDiff=yaw-tank.rot;
+  const sn=Math.atan2(Math.sin(steerDiff),Math.cos(steerDiff));
+  tank.rot+=sn*Math.min(1,Math.abs(tank.vel/8)+0.2)*dt*2.5;
+  // Turret always faces camera yaw
+  tank.turretRot=yaw;
+  tank.turret.rotation.y=tank.turretRot-tank.rot;
+  // Drive
+  const maxFwd=14, maxRev=-6, accel=8, brakeF=14, fric=7;
+  if(keys['KeyW']||keys['ArrowUp']) tank.vel=Math.min(maxFwd,tank.vel+accel*dt);
+  else if(keys['KeyS']||keys['ArrowDown']) tank.vel=Math.max(maxRev,tank.vel-brakeF*dt);
+  else{tank.vel+=(tank.vel>0?-1:tank.vel<0?1:0)*fric*dt; if(Math.abs(tank.vel)<0.15)tank.vel=0;}
+  tank.pos.x+=Math.sin(-tank.rot)*tank.vel*dt;
+  tank.pos.z+=Math.cos(-tank.rot)*tank.vel*dt;
+  tank.pos.x=Math.max(-490,Math.min(490,tank.pos.x));
+  tank.pos.z=Math.max(-490,Math.min(490,tank.pos.z));
+  tank.mesh.position.copy(tank.pos);
+  tank.mesh.rotation.y=tank.rot;
+  playerPos.set(tank.pos.x,tank.pos.y+2.2,tank.pos.z);
+  camera.position.copy(playerPos);
+  camera.rotation.order='YXZ'; camera.rotation.y=yaw; camera.rotation.x=pitch;
+}
+
+function fireTankCannon(){
+  if(!inTank||!currentTank) return;
+  const tank=currentTank;
+  if(tank.shootTimer>0) return;
+  tank.shootTimer=2.5; // reload time
+  // Muzzle flash
+  const origin=new THREE.Vector3(
+    tank.pos.x+Math.sin(-tank.turretRot)*3.8,
+    tank.pos.y+2.1,
+    tank.pos.z+Math.cos(-tank.turretRot)*3.8
+  );
+  const dir=new THREE.Vector3(Math.sin(-tank.turretRot),0,Math.cos(-tank.turretRot));
+  // Spawn shell projectile
+  const shellGeo=new THREE.SphereGeometry(0.25,6,6);
+  const shellMat=new THREE.MeshLambertMaterial({color:0xffcc00,emissive:0xff8800,emissiveIntensity:1});
+  const shell=new THREE.Mesh(shellGeo,shellMat);
+  shell.position.copy(origin); scene.add(shell);
+  screenShake(0.05); flashHUD('💥 פגז נורה!');
+  // Animate shell
+  let dist=0;
+  const spd=60;
+  const shellInterval=setInterval(()=>{
+    dist+=spd*0.016;
+    shell.position.add(dir.clone().multiplyScalar(spd*0.016));
+    // Check enemy hits
+    enemies.forEach(e=>{
+      const d=e.position.distanceTo(shell.position);
+      if(d<3){
+        const dmg=80+Math.floor(Math.random()*40);
+        e.userData.hp=Math.max(0,e.userData.hp-dmg);
+        e.userData.provoked=true;
+        updateEnemyHP(e);
+        if(e.userData.hp<=0) killEnemy(e);
+        clearInterval(shellInterval); scene.remove(shell);
+      }
+    });
+    if(dist>300){clearInterval(shellInterval); scene.remove(shell);}
+  },16);
+}
+
 // ─── CAR SYSTEM ──────────────────────────────────────────────────────────────
 function mkCar(x,z,color){
   const g=new THREE.Group();
@@ -2497,8 +2734,8 @@ function updateCars(dt){
   // Move
   car.pos.x+=Math.sin(-car.rot)*car.vel*dt;
   car.pos.z+=Math.cos(-car.rot)*car.vel*dt;
-  car.pos.x=Math.max(-195,Math.min(195,car.pos.x));
-  car.pos.z=Math.max(-195,Math.min(195,car.pos.z));
+  car.pos.x=Math.max(-490,Math.min(490,car.pos.x));
+  car.pos.z=Math.max(-490,Math.min(490,car.pos.z));
   car.mesh.position.copy(car.pos);
   car.mesh.rotation.y=car.rot;
   // Rotate wheels visually
@@ -2511,6 +2748,26 @@ function updateCars(dt){
   if(carHudEl){carHudEl.style.display='block';carSpeedEl.textContent=Math.round(Math.abs(car.vel)*3.6);}
 }
 
+function enterExitHeli(){
+  if(inHeli&&currentHeli){
+    inHeli=false; currentHeli.occupied=false;
+    playerPos.set(currentHeli.pos.x+3,Math.max(1.8,currentHeli.pos.y),currentHeli.pos.z+3);
+    currentHeli=null; flashHUD('יצאת מהמסוק');
+  } else if(nearHeli){
+    inHeli=true; nearHeli.occupied=true; currentHeli=nearHeli;
+    flashHUD('🚁 נכנסת למסוק! Space=עלה  Ctrl=רד  W/S=קדימה/אחורה');
+  }
+}
+function enterExitTank(){
+  if(inTank&&currentTank){
+    inTank=false; currentTank.occupied=false;
+    playerPos.set(currentTank.pos.x+3,1.8,currentTank.pos.z+3);
+    currentTank=null; flashHUD('יצאת מהטנק');
+  } else if(nearTank){
+    inTank=true; nearTank.occupied=true; currentTank=nearTank;
+    flashHUD('🪖 נכנסת לטנק! לחץ קליק שמאל לירות פגז');
+  }
+}
 function enterExitCar(){
   if(inCar&&currentCar){
     // Exit
@@ -2827,6 +3084,13 @@ function refreshElevDisplay(el){
   el.numTex.needsUpdate=true;
 }
 
+function toggleBotMode(){
+  botPassive=!botPassive;
+  const el=document.getElementById('botModeHUD');
+  el.textContent=botPassive?'🤖 בוטים: פסיביים':'🤖 בוטים: אגרסיביים';
+  el.style.borderColor=botPassive?'#44ff44':'rgba(255,255,255,.2)';
+  flashHUD(botPassive?'🤖 הבוטים יתקפו רק אם תפגע בהם':'🤖 הבוטים תוקפים אוטומטית!');
+}
 function sendElevatorTo(el,floor){
   if(floor===el.targetFloor&&el.state==='idle') return;
   el.targetFloor=Math.max(0,Math.min(el.nFloors-1,floor));
@@ -3317,6 +3581,16 @@ function mkHotel(x,z){
   addHWall(x-entrW/2-sideW/2,totalH/2,z-bd/2, sideW,totalH,wallT);
   addHWall(x+entrW/2+sideW/2,totalH/2,z-bd/2, sideW,totalH,wallT);
   addHWall(x,entrH+(totalH-entrH)/2,z-bd/2, entrW,totalH-entrH,wallT);
+  // Walkable floor slabs (MUST be in mapObjects for collision)
+  for(let f=0;f<nFloors;f++){
+    const slab=new THREE.Mesh(
+      new THREE.BoxGeometry(bw-wallT*2-0.1, 0.2, bd-wallT*2-0.1),
+      new THREE.MeshLambertMaterial({color:0xaa9977}));
+    slab.position.set(x, f*floorH+0.1, z);
+    slab.receiveShadow=true;
+    slab.userData={isMapObj:true, w:bw-wallT*2-0.1, h:0.2, d:bd-wallT*2-0.1};
+    scene.add(slab); mapObjects.push(slab); hotelMeshes.push(slab);
+  }
   // Horizontal floor bands in gold
   for(let f=0;f<=nFloors;f++){
     const band=new THREE.Mesh(new THREE.BoxGeometry(bw+0.15,0.28,bd+0.15),goldMat.clone());
@@ -3512,21 +3786,23 @@ function spawnHouses(){
   houses.length=0;
   houseMeshes.forEach(m=>scene.remove(m)); houseMeshes.length=0;
   const spots=[
-    {x:-40,z:-40,p:400},{x:40,z:-40,p:500},{x:-40,z:40,p:450},
-    {x:40,z:40,p:550},{x:0,z:-80,p:600},{x:-80,z:0,p:350},
-    {x:80,z:0,p:650},{x:0,z:80,p:500}
+    {x:-70,z:-70,p:400},{x:70,z:-70,p:500},{x:-70,z:70,p:450},
+    {x:70,z:70,p:550},{x:0,z:-130,p:600},{x:-130,z:0,p:350},
+    {x:130,z:0,p:650},{x:0,z:130,p:500},
+    {x:-130,z:-130,p:480},{x:130,z:130,p:520}
   ];
   spots.forEach(s=>mkHouse(s.x,s.z,s.p));
   // Apartment buildings
   apartBuildings.length=0;
   apartMeshes.forEach(m=>scene.remove(m)); apartMeshes.length=0;
-  mkApartBuilding(-60,-60,4,12,10);
-  mkApartBuilding(60,60,5,12,10);
-  mkApartBuilding(-60,60,3,12,10);
+  mkApartBuilding(-100,-100,4,12,10);
+  mkApartBuilding(100,100,5,12,10);
+  mkApartBuilding(-100,100,3,12,10);
+  mkApartBuilding(100,-100,6,14,11);
   // Hotel
   hotelMeshes.forEach(m=>scene.remove(m)); hotelMeshes.length=0;
   hotelBuilding=null;
-  mkHotel(60,-60);
+  mkHotel(0,150);
 }
 
 // ─── SHOP SYSTEM ─────────────────────────────────────────────────────────────
@@ -3624,6 +3900,7 @@ function beginGame(){
   showScreen('startScreen');
   document.getElementById('startScreen').style.display='none';
   document.getElementById('hud').style.display='block';
+  document.getElementById('botModeHUD').style.display='block';
   const showWave=isSolo||(roomGameMode==='coop');
   document.getElementById('waveDisplay').style.display=showWave?'block':'none';
   // Init new state
@@ -3649,18 +3926,22 @@ function beginGame(){
   spawnHouses();
   // Spawn cars at road intersections
   const carColors=[0xff2222,0x2255ff,0xffcc00,0xffffff,0xff8800,0x22aa22];
-  const carSpots=[{x:0,z:-70},{x:70,z:0},{x:-70,z:0},{x:0,z:70},{x:70,z:-70},{x:-70,z:70}];
+  const carSpots=[{x:0,z:-100},{x:100,z:0},{x:-100,z:0},{x:0,z:100},{x:100,z:-100},{x:-100,z:100},{x:150,z:50},{x:-150,z:-50}];
   carSpots.forEach((s,i)=>mkCar(s.x,s.z,carColors[i%carColors.length]));
+  // Spawn tanks
+  [{x:150,z:150},{x:-150,z:150},{x:150,z:-150},{x:-150,z:-150}].forEach(s=>mkTank(s.x,s.z));
+  // Spawn helicopters
+  [{x:200,z:0},{x:-200,z:0},{x:0,z:200}].forEach(s=>mkHelicopter(s.x,s.z));
   // Spawn shops
   [[-35,-35],[35,35],[-35,35]].forEach(([x,z])=>mkShop(x,z));
   // Scatter weapon crates
-  for(let i=0;i<25;i++){
-    const a=Math.random()*Math.PI*2,d=6+Math.random()*75;
+  for(let i=0;i<40;i++){
+    const a=Math.random()*Math.PI*2,d=6+Math.random()*200;
     mkLootBox(Math.cos(a)*d,Math.sin(a)*d);
   }
   // Scatter health crates
-  for(let i=0;i<12;i++){
-    const a=Math.random()*Math.PI*2,d=8+Math.random()*65;
+  for(let i=0;i<20;i++){
+    const a=Math.random()*Math.PI*2,d=8+Math.random()*180;
     mkHealthCrate(Math.cos(a)*d,Math.sin(a)*d);
   }
   if(isSolo){
@@ -3689,6 +3970,8 @@ function loop(t){
   if(gameStarted&&!gamePaused){
     updatePlayer(dt);
     updateCars(dt);
+    updateTanks(dt);
+    updateHelicopters(dt);
     updateDoors(dt);
     updateElevators(dt);
     updateHotel(dt);
