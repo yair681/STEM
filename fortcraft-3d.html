@@ -2943,7 +2943,8 @@ function mkHouse(x, z, price){
   doorPanel.position.set(doorW/2, doorH/2, 0);
   doorPanel.castShadow=true;
   doorPivot.add(doorPanel);
-  const doorObj={pivot:doorPivot,open:false,targetRot:0,currentRot:0,houseRef:null};
+  const doorObj={pivot:doorPivot,open:true,targetRot:-Math.PI/2,currentRot:-Math.PI/2,houseRef:null};
+  doorPivot.rotation.y=-Math.PI/2;
   allDoors.push(doorObj);
   houseMeshes.push(doorPanel);
 
@@ -3383,7 +3384,8 @@ function mkApartBuilding(x,z,nFloors,bw,bd){
   const dPanel=new THREE.Mesh(new THREE.BoxGeometry(doorW-0.12,doorH-0.14,0.09),
     new THREE.MeshLambertMaterial({color:0x667788,transparent:true,opacity:0.8}));
   dPanel.position.set(doorW/2,doorH/2,0); dPanel.castShadow=true; dPivot.add(dPanel);
-  const dObj={pivot:dPivot,open:false,targetRot:0,currentRot:0};
+  const dObj={pivot:dPivot,open:true,targetRot:-Math.PI/2,currentRot:-Math.PI/2};
+  dPivot.rotation.y=-Math.PI/2;
   allDoors.push(dObj);
   // Interior lobby lights
   const lobbyL=new THREE.PointLight(0xffeedd,1.5,bw);
@@ -3687,7 +3689,8 @@ function mkHotel(x,z){
   const dPanel=new THREE.Mesh(new THREE.BoxGeometry(entrW-0.12,entrH-0.18,0.09),
     new THREE.MeshLambertMaterial({color:0xaaddff,transparent:true,opacity:0.55}));
   dPanel.position.set(entrW/2,entrH/2,0); dPanel.castShadow=true; dPivot.add(dPanel);
-  const dObj={pivot:dPivot,open:false,targetRot:0,currentRot:0};
+  const dObj={pivot:dPivot,open:true,targetRot:-Math.PI/2,currentRot:-Math.PI/2};
+  dPivot.rotation.y=-Math.PI/2;
   allDoors.push(dObj);
   // Lobby interior
   // Reception counter (L-shaped)
