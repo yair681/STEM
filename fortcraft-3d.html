@@ -1406,6 +1406,10 @@ function shoot(){
     Object.entries(remotePlayerMeshes).forEach(([id,g])=>g.children.filter(c=>c.isMesh).forEach(m=>{m.userData.remoteId=id;targets.push(m);}));
     // server bots (co-op)
     Object.entries(roomBotMeshes).forEach(([id,g])=>g.children.filter(c=>c.isMesh).forEach(m=>{m.userData.botId=id;targets.push(m);}));
+    // vehicles (tanks, helicopters, cars) — skip the one the player is currently in
+    tanks.forEach(t=>{if(currentTank!==t)t.mesh.traverse(c=>{if(c.isMesh){c.userData.vehicleRef=t;c.userData.vehicleType='tank';targets.push(c);}});});
+    helicopters.forEach(h=>{if(currentHeli!==h)h.mesh.traverse(c=>{if(c.isMesh){c.userData.vehicleRef=h;c.userData.vehicleType='heli';targets.push(c);}});});
+    cars.forEach(car=>{if(currentCar!==car)car.mesh.traverse(c=>{if(c.isMesh){c.userData.vehicleRef=car;c.userData.vehicleType='car';targets.push(c);}});});
     const hits=rc.intersectObjects(targets,false);
     if(hits.length>0){
       const h=hits[0];
@@ -1438,6 +1442,23 @@ function shoot(){
         hitE.userData.provoked=true;
         spawnText(h.point,`-${dmg}`,'#ff4444');
         if(hitE.userData.hp<=0) killEnemy(hitE);
+      }
+      // vehicle hit?
+      if(h.object.userData.vehicleRef){
+        const vRef=h.object.userData.vehicleRef;
+        const vType=h.object.userData.vehicleType;
+        const dmg=WEAPONS[currentWeaponKey].damage+Math.floor(Math.random()*10);
+        if(vRef.hp===undefined) vRef.hp=200;
+        vRef.hp-=dmg;
+        spawnText(h.point,`-${dmg}`,'#ffaa00');
+        if(vRef.hp<=0){
+          explosionFX(vRef.pos.clone().add(new THREE.Vector3(0,1,0)),10,100,false);
+          scene.remove(vRef.mesh);
+          if(vType==='tank'){tanks.splice(tanks.indexOf(vRef),1);if(currentTank===vRef){inTank=false;currentTank=null;hp=Math.max(0,hp-80);updateHUD();}}
+          if(vType==='heli'){helicopters.splice(helicopters.indexOf(vRef),1);if(currentHeli===vRef){inHeli=false;currentHeli=null;hp=Math.max(0,hp-80);updateHUD();}}
+          if(vType==='car'){cars.splice(cars.indexOf(vRef),1);if(currentCar===vRef){inCar=false;currentCar=null;hp=Math.max(0,hp-50);updateHUD();}}
+        }
+        continue;
       }
       // resources
       envObjects.forEach(o=>{
@@ -1528,9 +1549,10 @@ function updatePlayer(dt){
     const dx=playerPos.x-s.position.x, dz=playerPos.z-s.position.z;
     if(Math.abs(dx)<hw&&Math.abs(dz)<hd){
       const topY=s.position.y+s.userData.h/2;
+      const botY=s.position.y-s.userData.h/2;
       if(playerPos.y>topY-0.5&&playerPos.y<topY+2.5) floorY=Math.max(floorY,topY);
-      else if(playerPos.y<=topY){
-        // Push out horizontally
+      else if(playerPos.y<=topY&&playerPos.y>botY-1.8){
+        // Push out horizontally (only when player body actually overlaps the object's height range)
         if(Math.abs(dx)/hw<Math.abs(dz)/hd) playerPos.x=s.position.x+(dx>0?hw:-hw);
         else playerPos.z=s.position.z+(dz>0?hd:-hd);
       }
@@ -2502,9 +2524,12 @@ function mkHelicopter(x,z){
   // Nose light
   const nLight=new THREE.PointLight(0xffffcc,0.8,20);
   nLight.position.set(0,0,-2.5); g.add(nLight);
+  // Driver marker: glowing red sphere visible when helicopter is occupied by someone else
+  const driverMarker=new THREE.Mesh(new THREE.SphereGeometry(0.28,8,8),new THREE.MeshBasicMaterial({color:0xff2200}));
+  driverMarker.position.set(0,1.8,0); driverMarker.visible=false; g.add(driverMarker);
   g.position.set(x,0.8,z);
   scene.add(g);
-  const heli={mesh:g,rotorGroup,tailRotor,nLight,pos:new THREE.Vector3(x,0.8,z),rot:0,vel:0,velY:0,occupied:false,id:helicopters.length};
+  const heli={mesh:g,rotorGroup,tailRotor,nLight,driverMarker,pos:new THREE.Vector3(x,0.8,z),rot:0,vel:0,velY:0,occupied:false,hp:150,id:helicopters.length};
   helicopters.push(heli); return heli;
 }
 
@@ -2514,6 +2539,8 @@ function updateHelicopters(dt){
   helicopters.forEach(h=>{
     h.rotorGroup.rotation.y=heliRotorAngle;
     h.tailRotor.rotation.x=heliRotorAngle*3;
+    // Driver marker: show pulsing red ball when occupied by another player
+    if(h.driverMarker) h.driverMarker.visible=h.occupied&&currentHeli!==h;
   });
   // Proximity detection
   nearHeli=null;
@@ -2586,13 +2613,18 @@ function mkTank(x,z){
   const barrelTip=new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.12,0.4,8),metalMat);
   barrelTip.rotation.x=Math.PI/2; barrelTip.position.set(0,0.3,-3.95); turret.add(barrelTip);
   g.add(turret);
+  // Driver marker: glowing red sphere visible when tank is occupied by someone else
+  const driverMarker=new THREE.Mesh(new THREE.SphereGeometry(0.28,8,8),new THREE.MeshBasicMaterial({color:0xff2200}));
+  driverMarker.position.set(0,3.2,0); driverMarker.visible=false; g.add(driverMarker);
   g.position.set(x,0,z);
   scene.add(g);
-  const tank={mesh:g,turret,pos:new THREE.Vector3(x,0,z),rot:0,turretRot:0,vel:0,occupied:false,shootTimer:0,id:tanks.length};
+  const tank={mesh:g,turret,driverMarker,pos:new THREE.Vector3(x,0,z),rot:0,turretRot:0,vel:0,occupied:false,hp:200,shootTimer:0,id:tanks.length};
   tanks.push(tank); return tank;
 }
 
 function updateTanks(dt){
+  // Update driver markers
+  tanks.forEach(t=>{if(t.driverMarker) t.driverMarker.visible=t.occupied&&currentTank!==t;});
   // Update nearTank detection
   nearTank=null;
   if(!inTank){
@@ -2707,13 +2739,18 @@ function mkCar(x,z,color){
     const wh=new THREE.Mesh(wheelGeo,wheelMat);
     wh.rotation.z=Math.PI/2; wh.position.set(wx,wy,wz); wh.castShadow=true; g.add(wh);
   });
+  // Driver marker: glowing red sphere visible when car is occupied by someone else
+  const driverMarker=new THREE.Mesh(new THREE.SphereGeometry(0.25,8,8),new THREE.MeshBasicMaterial({color:0xff2200}));
+  driverMarker.position.set(0,2.2,0); driverMarker.visible=false; g.add(driverMarker);
   g.position.set(x,0,z);
   scene.add(g);
-  const car={mesh:g,pos:new THREE.Vector3(x,0,z),rot:0,vel:0,occupied:false,id:cars.length};
+  const car={mesh:g,driverMarker,pos:new THREE.Vector3(x,0,z),rot:0,vel:0,occupied:false,hp:120,id:cars.length};
   cars.push(car); return car;
 }
 
 function updateCars(dt){
+  // Update driver markers
+  cars.forEach(c=>{if(c.driverMarker) c.driverMarker.visible=c.occupied&&currentCar!==c;});
   const carHudEl=document.getElementById('carHUD');
   const carSpeedEl=document.getElementById('carSpeedNum');
   if(!inCar||!currentCar){if(carHudEl)carHudEl.style.display='none';return;}
