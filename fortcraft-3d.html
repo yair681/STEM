@@ -467,6 +467,7 @@ let nearElevator=null, elevPanelOpen=false;
 const apartBuildings=[];
 let nearApartBuilding=null;
 let apartOpen=false;
+let nearApartDoor=null, nearApartDoorBld=null;
 // Hotel
 let hotelBuilding=null;
 let nearHotel=null;
@@ -810,11 +811,20 @@ function checkPickupNearby(){
     const dx2=pp.x-playerPos.x, dz2=pp.z-playerPos.z;
     if(Math.sqrt(dx2*dx2+dz2*dz2)<2.8){nearDoor=d;break;}
   }
-  // Check apartment building proximity
+  // Check apartment building proximity (entrance)
   nearApartBuilding=null;
   for(const b of apartBuildings){
     const dx=Math.abs(playerPos.x-b.x), dz=Math.abs(playerPos.z-(b.z-b.bd/2));
     if(dx<3.5&&dz<3.5){nearApartBuilding=b;break;}
+  }
+  // Check apartment door proximity (inside building, on each floor)
+  nearApartDoor=null; nearApartDoorBld=null;
+  outer: for(const b of apartBuildings){
+    for(const ad of b.aptDoors){
+      const dx=Math.abs(playerPos.x-ad.doorX), dz=Math.abs(playerPos.z-ad.doorZ);
+      const dy=Math.abs(playerPos.y-(ad.doorY+1.8));
+      if(dx<2&&dz<2&&dy<1.5){nearApartDoor=ad;nearApartDoorBld=b;break outer;}
+    }
   }
   // Check hotel proximity
   nearHotel=null;
@@ -822,10 +832,18 @@ function checkPickupNearby(){
     const dx=Math.abs(playerPos.x-hotelBuilding.x), dz=Math.abs(playerPos.z-(hotelBuilding.z-hotelBuilding.bd/2));
     if(dx<4&&dz<4) nearHotel=hotelBuilding;
   }
-  // Determine prompt priority: elevator > hotel > apartment > shop > house > door > car > pickup
+  // Determine prompt priority: elevator > apt door > hotel > apartment entrance > shop > house > door > car > pickup
   if(nearElevator){
     el.style.display='block';
     el.textContent=`🛗 E לבחור קומה (קומה ${nearElevator.currentFloor+1})`;
+  } else if(nearApartDoor){
+    const apt=nearApartDoorBld.apts[nearApartDoor.floorIdx];
+    el.style.display='block';
+    if(apt.owned){
+      el.textContent=nearApartDoor.pivot.open?`🏠 E לסגור דלת הדירה`:`🏠 E להיכנס לדירה ${nearApartDoor.floorIdx+1}`;
+    } else {
+      el.textContent=`🔒 דירה ${nearApartDoor.floorIdx+1} — לא נרכשה (${apt.price} 💰)`;
+    }
   } else if(nearHotel){
     el.style.display='block';
     el.textContent='🏨 E להזמנת חדר מלון';
@@ -1672,7 +1690,7 @@ function cleanupGame(){
   houses.length=0; nearHouse=null;
   // Apartment buildings
   apartMeshes.forEach(m=>scene.remove(m)); apartMeshes.length=0;
-  apartBuildings.length=0; nearApartBuilding=null; apartOpen=false;
+  apartBuildings.length=0; nearApartBuilding=null; apartOpen=false; nearApartDoor=null; nearApartDoorBld=null;
   // Hotel
   hotelMeshes.forEach(m=>scene.remove(m)); hotelMeshes.length=0;
   hotelBuilding=null; nearHotel=null; hotelOpen=false;
@@ -1762,8 +1780,22 @@ document.addEventListener('keydown',e=>{
   if(e.code==='KeyX') switchWeapon();
   if(e.code==='KeyR') reload();
   if(e.code==='KeyE'){
-    // Priority: elevator > hotel > apartment > shop > house > door > car
+    // Priority: elevator > apt door > hotel > apartment entrance > shop > house > door > car
     if(nearElevator&&!elevPanelOpen){openElevPanel(nearElevator);return;}
+    if(nearApartDoor){
+      const apt=nearApartDoorBld.apts[nearApartDoor.floorIdx];
+      if(apt.owned){
+        toggleDoor(nearApartDoor.pivot);
+        if(nearApartDoor.pivot.open){
+          // Entering apartment - welcome home!
+          hp=Math.min(100,hp+15); updateHUD();
+          flashHUD(`🏠 ברוך הבא לדירה ${nearApartDoor.floorIdx+1}! +15 HP`);
+        }
+      } else {
+        flashHUD(`🔒 הדירה לא שלך! קנה אותה ליד הכניסה`);
+      }
+      return;
+    }
     if(nearHotel&&!hotelOpen){openHotelOverlay();return;}
     if(nearApartBuilding&&!apartOpen){openApartOverlay(nearApartBuilding);return;}
     if(nearShop&&!shopOpen){openShop();return;}
@@ -2891,7 +2923,19 @@ function mkApartBuilding(x,z,nFloors,bw,bd){
   addAWall(x-doorW/2-sideW/2,totalH/2,z-bd/2, sideW,totalH,wallT);
   addAWall(x+doorW/2+sideW/2,totalH/2,z-bd/2, sideW,totalH,wallT);
   addAWall(x,doorH+(totalH-doorH)/2,z-bd/2, doorW,totalH-doorH,wallT);
-  // Horizontal floor bands (accent stripes between floors)
+  // ── Interior walkable floor slabs (MUST be in mapObjects with userData) ──
+  for(let f=0;f<nFloors;f++){
+    const floorY=f*floorH;
+    const slab=new THREE.Mesh(
+      new THREE.BoxGeometry(bw-wallT*2-0.1, 0.2, bd-wallT*2-0.1),
+      new THREE.MeshLambertMaterial({color:f===0?0x778899:0x889aaa})
+    );
+    slab.position.set(x, floorY+0.1, z);
+    slab.receiveShadow=true;
+    slab.userData={isMapObj:true, w:bw-wallT*2-0.1, h:0.2, d:bd-wallT*2-0.1};
+    scene.add(slab); mapObjects.push(slab); apartMeshes.push(slab);
+  }
+  // Horizontal floor bands (accent stripes on exterior between floors)
   for(let f=0;f<=nFloors;f++){
     const band=new THREE.Mesh(new THREE.BoxGeometry(bw+0.05,0.22,bd+0.05),accentMat.clone());
     band.position.set(x,f*floorH,z); band.castShadow=true;
@@ -2977,9 +3021,93 @@ function mkApartBuilding(x,z,nFloors,bw,bd){
   // Apartments data
   const apts=[];
   for(let f=0;f<nFloors;f++) apts.push({floor:f,price:500+f*300,owned:false,ownerName:''});
-  const bld={x,z,bw,bd,nFloors,floorH,totalH,apts,sign:sp,signCanvas:cv2,signCtx:ctx2,door:dObj,elev};
+  const bld={x,z,bw,bd,nFloors,floorH,totalH,apts,sign:sp,signCanvas:cv2,signCtx:ctx2,door:dObj,elev,aptDoors:[]};
   apartBuildings.push(bld);
+  // ── Apartment doors on interior back wall (one per floor) ──
+  for(let f=0;f<nFloors;f++) addApartDoor(bld,f);
   return bld;
+}
+
+function addApartDoor(bld,floorIdx){
+  const apt=bld.apts[floorIdx];
+  const floorY=floorIdx*bld.floorH;
+  const doorW=1.3, doorH=2.5;
+  // Door frame on inner back wall (z + bd/2 - wallT)
+  const doorX=bld.x-bld.bw*0.2; // slightly left of center
+  const doorZ=bld.z+bld.bd/2-bld.bw*0.01-0.25;
+  // Frame
+  const frameMat=new THREE.MeshLambertMaterial({color:apt.owned?0x336633:0x555555});
+  const frame=new THREE.Mesh(new THREE.BoxGeometry(doorW+0.2,doorH+0.15,0.12),frameMat);
+  frame.position.set(doorX, floorY+doorH/2+0.2, doorZ);
+  frame.castShadow=true; scene.add(frame); apartMeshes.push(frame);
+  // Door panel pivot
+  const pivot=new THREE.Group();
+  pivot.position.set(doorX-doorW/2+0.04, floorY+0.2, doorZ-0.02);
+  scene.add(pivot); apartMeshes.push(pivot);
+  const panelMat=new THREE.MeshLambertMaterial({color:apt.owned?0x4a7a4a:0x8B6914});
+  const panel=new THREE.Mesh(new THREE.BoxGeometry(doorW-0.06,doorH-0.06,0.08),panelMat);
+  panel.position.set(doorW/2,doorH/2,0); pivot.add(panel);
+  // Door knob
+  const knob=new THREE.Mesh(new THREE.SphereGeometry(0.07,6,6),
+    new THREE.MeshLambertMaterial({color:apt.owned?0xddaa22:0x888888}));
+  knob.position.set(doorW-0.15,doorH/2,0.08); pivot.add(knob);
+  const dObj={pivot,open:false,targetRot:0,currentRot:0};
+  allDoors.push(dObj);
+  // Apartment number plate
+  const plateMat=new THREE.MeshLambertMaterial({color:apt.owned?0x336633:0x333333});
+  const plate=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.28,0.05),plateMat);
+  plate.position.set(doorX+doorW/2+0.35, floorY+doorH*0.65+0.2, doorZ-0.02);
+  scene.add(plate); apartMeshes.push(plate);
+  // Floating label sprite
+  const cv=document.createElement('canvas'); cv.width=220; cv.height=70;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle=apt.owned?'rgba(40,100,40,0.92)':'rgba(40,40,60,0.88)';
+  ctx.roundRect(3,3,214,64,10); ctx.fill();
+  ctx.fillStyle=apt.owned?'#88ff88':'#aaaacc';
+  ctx.font=`bold 22px Arial`; ctx.textAlign='center';
+  ctx.fillText(apt.owned?`🏠 דירה ${floorIdx+1}`:`🔒 דירה ${floorIdx+1}`,110,28);
+  ctx.font='14px Arial'; ctx.fillStyle=apt.owned?'#ccffcc':'#777799';
+  ctx.fillText(apt.owned?`${apt.ownerName||'שלך'} | E להיכנס`:`${apt.price} 💰 | לא נרכש`,110,54);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv),transparent:true,depthTest:false}));
+  sp.scale.set(2.6,0.83,1);
+  sp.position.set(doorX,floorY+doorH+0.85,doorZ-0.05);
+  scene.add(sp); apartMeshes.push(sp);
+  // Interior light (warm if owned)
+  const roomLight=new THREE.PointLight(apt.owned?0xffeecc:0x334455,apt.owned?0.9:0.2,6);
+  roomLight.position.set(doorX, floorY+2, doorZ-2);
+  scene.add(roomLight); apartMeshes.push(roomLight);
+  // Store reference
+  bld.aptDoors.push({
+    floorIdx, doorX, doorZ, doorY:floorY,
+    pivot:dObj, frameMesh:frame, labelSprite:sp, roomLight,
+    panelMesh:panel, plateMesh:plate, knobMesh:knob, panelMat, frameMat, plateMat
+  });
+}
+
+function refreshApartDoor(bld,floorIdx){
+  // Rebuild door visuals after purchase
+  const aptDoor=bld.aptDoors[floorIdx];
+  if(!aptDoor) return;
+  const apt=bld.apts[floorIdx];
+  // Update colors
+  aptDoor.panelMat.color.setHex(apt.owned?0x4a7a4a:0x8B6914);
+  aptDoor.frameMat.color.setHex(apt.owned?0x336633:0x555555);
+  aptDoor.plateMat.color.setHex(apt.owned?0x336633:0x333333);
+  aptDoor.knobMesh.material.color.setHex(apt.owned?0xddaa22:0x888888);
+  aptDoor.roomLight.color.setHex(apt.owned?0xffeecc:0x334455);
+  aptDoor.roomLight.intensity=apt.owned?0.9:0.2;
+  // Update sprite label
+  const cv=document.createElement('canvas'); cv.width=220; cv.height=70;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle=apt.owned?'rgba(40,100,40,0.92)':'rgba(40,40,60,0.88)';
+  ctx.roundRect(3,3,214,64,10); ctx.fill();
+  ctx.fillStyle=apt.owned?'#88ff88':'#aaaacc';
+  ctx.font='bold 22px Arial'; ctx.textAlign='center';
+  ctx.fillText(apt.owned?`🏠 דירה ${floorIdx+1}`:`🔒 דירה ${floorIdx+1}`,110,28);
+  ctx.font='14px Arial'; ctx.fillStyle=apt.owned?'#ccffcc':'#777799';
+  ctx.fillText(apt.owned?`${apt.ownerName||'שלך'} | E להיכנס`:`${apt.price} 💰 | לא נרכש`,110,54);
+  aptDoor.labelSprite.material.map=new THREE.CanvasTexture(cv);
+  aptDoor.labelSprite.material.needsUpdate=true;
 }
 
 function openApartOverlay(bld){
@@ -3010,8 +3138,9 @@ function buyApartment(bld,idx){
   document.getElementById('moneyNum').textContent=money;
   apt.owned=true; apt.ownerName=playerName;
   hp=Math.min(100,hp+30); updateHUD();
-  flashHUD(`🏢 קנית דירה בקומה ${apt.floor+1}! +30 HP`);
-  openApartOverlay(bld); // refresh
+  refreshApartDoor(bld,idx);
+  flashHUD(`🏢 קנית דירה בקומה ${apt.floor+1}! קח את המעלית! +30 HP`);
+  openApartOverlay(bld);
 }
 
 function closeApartOverlay(){
