@@ -110,6 +110,13 @@ canvas{display:block;position:fixed;top:0;left:0;}
 .room-btn.owned{border-color:#22cc66;background:rgba(34,200,100,.12);cursor:default;}
 .room-btn.rented{border-color:#00aaff;background:rgba(0,150,255,.12);cursor:default;}
 #hotelTimerHUD{display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.8);color:#00aaff;padding:7px 22px;border-radius:20px;font-size:15px;font-weight:bold;border:1px solid #00aaff;pointer-events:none;z-index:50;}
+/* Elevator */
+#elevPanel{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(10,10,20,.95);border:2px solid #556677;border-radius:14px;padding:22px 28px;z-index:400;color:white;text-align:center;min-width:220px;}
+#elevPanel h3{color:#aaccff;margin-bottom:4px;font-size:18px;}
+.floor-btn{width:52px;height:52px;background:rgba(80,100,130,.7);border:2px solid #445566;border-radius:8px;color:white;font-size:16px;font-weight:bold;cursor:pointer;transition:all .15s;}
+.floor-btn:hover{background:rgba(255,200,0,.35);border-color:#ffcc00;color:#ffcc00;}
+.floor-btn.active-floor{background:rgba(255,200,0,.5);border-color:#ffcc00;color:#ffcc00;}
+#floorHUD{display:none;position:fixed;top:60px;left:14px;background:rgba(0,0,0,.75);color:white;padding:6px 16px;border-radius:12px;font-size:14px;border:1px solid rgba(150,180,220,.4);pointer-events:none;z-index:50;}
 </style>
 </head>
 <body>
@@ -225,6 +232,17 @@ canvas{display:block;position:fixed;top:0;left:0;}
 
 <!-- HOTEL TIMER HUD -->
 <div id="hotelTimerHUD">🏨 חדר מלון: <span id="hotelTimerNum">00:00</span></div>
+
+<!-- ELEVATOR FLOOR PANEL -->
+<div id="elevPanel">
+  <h3>🛗 מעלית</h3>
+  <div style="color:#aaa;font-size:13px;margin-bottom:14px;">קומה נוכחית: <span id="elevCurFloor">1</span></div>
+  <div id="elevBtns" style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:260px;"></div>
+  <div style="margin-top:12px;color:#556;font-size:11px;">ESC לסגור</div>
+</div>
+
+<!-- FLOOR HUD (shows when inside building) -->
+<div id="floorHUD">🏢 קומה <span id="floorNum">1</span></div>
 
 <!-- SHOP OVERLAY -->
 <div id="shopOverlay">
@@ -444,6 +462,7 @@ const allDoors=[];
 let nearDoor=null;
 // Elevator system
 const elevators=[];
+let nearElevator=null, elevPanelOpen=false;
 // Apartment buildings
 const apartBuildings=[];
 let nearApartBuilding=null;
@@ -803,8 +822,11 @@ function checkPickupNearby(){
     const dx=Math.abs(playerPos.x-hotelBuilding.x), dz=Math.abs(playerPos.z-(hotelBuilding.z-hotelBuilding.bd/2));
     if(dx<4&&dz<4) nearHotel=hotelBuilding;
   }
-  // Determine prompt priority: hotel > apartment > shop > house > door > car > pickup
-  if(nearHotel){
+  // Determine prompt priority: elevator > hotel > apartment > shop > house > door > car > pickup
+  if(nearElevator){
+    el.style.display='block';
+    el.textContent=`🛗 E לבחור קומה (קומה ${nearElevator.currentFloor+1})`;
+  } else if(nearHotel){
     el.style.display='block';
     el.textContent='🏨 E להזמנת חדר מלון';
   } else if(nearApartBuilding){
@@ -1438,12 +1460,13 @@ function updatePlayer(dt){
   structures.forEach(s=>{
     if(s.userData.isStruct){const dx=Math.abs(playerPos.x-s.position.x),dz=Math.abs(playerPos.z-s.position.z);if(dx<2&&dz<2&&playerPos.y>s.position.y)floorY=Math.max(floorY,s.position.y+CELL/2);}
   });
-  // Elevator platforms as floors (handled in updateElevators but also here for gravity)
+  // Elevator cabin floor support (gravity)
   elevators.forEach(el=>{
+    if(!el.cabin) return;
     const dx=Math.abs(playerPos.x-el.x), dz=Math.abs(playerPos.z-el.z);
-    const platTop=el.mesh.position.y+0.09;
-    if(dx<1.1&&dz<1.1&&playerPos.y>=platTop+1.6&&playerPos.y<platTop+2.2){
-      floorY=Math.max(floorY,platTop);
+    const cabFloor=el.cabin.position.y+0.12;
+    if(dx<el.cW/2-0.15&&dz<el.cD/2-0.15&&playerPos.y>=cabFloor+1.4&&playerPos.y<cabFloor+el.cH){
+      floorY=Math.max(floorY,cabFloor);
     }
   });
   // Floor/collision from map objects (buildings etc.)
@@ -1658,7 +1681,7 @@ function cleanupGame(){
   document.getElementById('hotelOverlay').style.display='none';
   document.getElementById('apartOverlay').style.display='none';
   // Elevators
-  elevators.forEach(e=>scene.remove(e.mesh)); elevators.length=0;
+  elevators.forEach(e=>{if(e.cabin)scene.remove(e.cabin);if(e.shaft)scene.remove(e.shaft);}); elevators.length=0;
   // Doors
   allDoors.forEach(d=>{if(d.pivot)scene.remove(d.pivot);}); allDoors.length=0;
   nearDoor=null;
@@ -1725,6 +1748,7 @@ document.addEventListener('keydown',e=>{
   if(chatOpen) return;
   if(e.code==='KeyT'){openChatInput();return;}
   if(e.code==='Escape'){
+    if(elevPanelOpen){closeElevPanel();return;}
     if(hotelOpen){closeHotelOverlay();return;}
     if(apartOpen){closeApartOverlay();return;}
     if(shopOpen){closeShop();return;}
@@ -1738,7 +1762,8 @@ document.addEventListener('keydown',e=>{
   if(e.code==='KeyX') switchWeapon();
   if(e.code==='KeyR') reload();
   if(e.code==='KeyE'){
-    // Priority: hotel > apartment > shop > house > door > car
+    // Priority: elevator > hotel > apartment > shop > house > door > car
+    if(nearElevator&&!elevPanelOpen){openElevPanel(nearElevator);return;}
     if(nearHotel&&!hotelOpen){openHotelOverlay();return;}
     if(nearApartBuilding&&!apartOpen){openApartOverlay(nearApartBuilding);return;}
     if(nearShop&&!shopOpen){openShop();return;}
@@ -2647,119 +2672,312 @@ function updateDoors(dt){
 }
 
 // ─── ELEVATOR SYSTEM ─────────────────────────────────────────────────────────
-function mkElevator(x,z,minY,maxY,col){
-  const mat=new THREE.MeshLambertMaterial({color:col||0x888888,emissive:col||0x888888,emissiveIntensity:0.12});
-  const plat=new THREE.Mesh(new THREE.BoxGeometry(2.2,0.18,2.2),mat);
-  plat.position.set(x,minY+0.09,z);
-  plat.castShadow=true; plat.receiveShadow=true;
-  // Arrow indicator on top
-  const arrow=new THREE.Mesh(new THREE.BoxGeometry(0.15,0.4,0.15),new THREE.MeshLambertMaterial({color:0xffcc00,emissive:0xffcc00,emissiveIntensity:0.8}));
-  arrow.position.set(0,0.29,0); plat.add(arrow);
-  scene.add(plat);
-  const el={mesh:plat,x,z,minY:minY+0.09,maxY:maxY-0.5,speed:2.5,dir:1,carrying:false};
+function mkElevatorCabin(x,z,nFloors,floorH,meshesArr){
+  const cW=2.5,cD=2.5,cH=3.4;
+  const totalH=nFloors*floorH;
+  // Shaft (dark column behind the cabin)
+  const shaftMat=new THREE.MeshLambertMaterial({color:0x0a0a14,transparent:true,opacity:0.82});
+  const shaft=new THREE.Mesh(new THREE.BoxGeometry(cW+0.3,totalH+0.2,cD+0.3),shaftMat);
+  shaft.position.set(x,totalH/2,z);
+  scene.add(shaft); meshesArr.push(shaft);
+  // Shaft frame lines
+  for(let f=0;f<=nFloors;f++){
+    const stripe=new THREE.Mesh(new THREE.BoxGeometry(cW+0.4,0.06,cD+0.4),
+      new THREE.MeshLambertMaterial({color:0x334455}));
+    stripe.position.set(x,f*floorH,z);
+    scene.add(stripe); meshesArr.push(stripe);
+  }
+  // Cabin group
+  const cabin=new THREE.Group();
+  const metalMat=new THREE.MeshLambertMaterial({color:0xb8bec8});
+  const darkMat=new THREE.MeshLambertMaterial({color:0x334455});
+  // Floor plate
+  const fp=new THREE.Mesh(new THREE.BoxGeometry(cW,0.12,cD),metalMat);
+  fp.position.y=0.06; fp.castShadow=true; cabin.add(fp);
+  // Ceiling plate
+  const cp=new THREE.Mesh(new THREE.BoxGeometry(cW,0.12,cD),darkMat);
+  cp.position.y=cH-0.06; cabin.add(cp);
+  // Back wall (z+)
+  const bw=new THREE.Mesh(new THREE.BoxGeometry(cW,cH-0.24,0.1),metalMat);
+  bw.position.set(0,cH/2,cD/2-0.05); cabin.add(bw);
+  // Left wall (x-)
+  const lw=new THREE.Mesh(new THREE.BoxGeometry(0.1,cH-0.24,cD),metalMat);
+  lw.position.set(-cW/2+0.05,cH/2,0); cabin.add(lw);
+  // Right wall (x+)
+  const rw=new THREE.Mesh(new THREE.BoxGeometry(0.1,cH-0.24,cD),metalMat);
+  rw.position.set(cW/2-0.05,cH/2,0); cabin.add(rw);
+  // Ceiling light panel
+  const lp=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.06,0.9),
+    new THREE.MeshLambertMaterial({color:0xffffff,emissive:0xffffff,emissiveIntensity:1}));
+  lp.position.set(0,cH-0.1,0); cabin.add(lp);
+  const iLight=new THREE.PointLight(0xffeedd,2,5);
+  iLight.position.set(0,cH-0.25,0); cabin.add(iLight);
+  // Floor number display (canvas sprite on back wall)
+  const numCv=document.createElement('canvas'); numCv.width=128; numCv.height=80;
+  const numCtx=numCv.getContext('2d');
+  const numTex=new THREE.CanvasTexture(numCv);
+  const numSprite=new THREE.Sprite(new THREE.SpriteMaterial({map:numTex,depthTest:false,transparent:true}));
+  numSprite.scale.set(0.75,0.47,1);
+  numSprite.position.set(0,cH-0.6,cD/2-0.12);
+  cabin.add(numSprite);
+  // Control panel on right wall (visual)
+  const panel=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.7,0.45),darkMat);
+  panel.position.set(cW/2-0.08,cH/2,0); cabin.add(panel);
+  for(let i=0;i<Math.min(nFloors,6);i++){
+    const btn=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.08,0.08),
+      new THREE.MeshLambertMaterial({color:0xffcc00,emissive:0xffcc00,emissiveIntensity:0.6}));
+    btn.position.set(cW/2-0.05,0.25+i*0.1,0.12-i*0.04); cabin.add(btn);
+  }
+  // Doors (2 sliding halves, purely visual — they don't block)
+  const dMat=new THREE.MeshLambertMaterial({color:0x889aaa,transparent:true,opacity:0.6});
+  const dL=new THREE.Mesh(new THREE.BoxGeometry(cW/2-0.05,cH-0.24,0.07),dMat);
+  dL.position.set(-cW/4,cH/2,-cD/2+0.04);
+  cabin.add(dL);
+  const dR=new THREE.Mesh(new THREE.BoxGeometry(cW/2-0.05,cH-0.24,0.07),dMat);
+  dR.position.set(cW/4,cH/2,-cD/2+0.04);
+  cabin.add(dR);
+  cabin.position.set(x,0,z);
+  scene.add(cabin); meshesArr.push(cabin);
+  const el={cabin,shaft,numCv,numCtx,numTex,numSprite,dL,dR,
+    x,z,cW,cD,cH,nFloors,floorH,totalH,
+    currentFloor:0,targetFloor:0,speed:5,state:'idle'};
   elevators.push(el);
+  refreshElevDisplay(el);
   return el;
 }
 
-function updateElevators(dt){
-  elevators.forEach(el=>{
-    el.mesh.position.y+=el.speed*el.dir*dt;
-    if(el.mesh.position.y>=el.maxY){el.mesh.position.y=el.maxY;el.dir=-1;}
-    if(el.mesh.position.y<=el.minY){el.mesh.position.y=el.minY;el.dir=1;}
-    // Carry player
-    const dx=Math.abs(playerPos.x-el.x), dz=Math.abs(playerPos.z-el.z);
-    const platTop=el.mesh.position.y+0.09;
-    if(dx<1.1&&dz<1.1&&playerPos.y>=platTop&&playerPos.y<=platTop+0.55){
-      playerPos.y=platTop+1.8;
-      playerVel.y=0; onGround=true;
-      el.carrying=true;
-    } else el.carrying=false;
-  });
+function mkElevator(x,z,minY,maxY,col){
+  // Legacy shim - ignored, replaced by mkElevatorCabin in building functions
 }
+
+function refreshElevDisplay(el){
+  const ctx=el.numCtx,cv=el.numCv;
+  ctx.fillStyle='#020a04'; ctx.fillRect(0,0,cv.width,cv.height);
+  // Green LED border
+  ctx.strokeStyle='#003300'; ctx.lineWidth=3; ctx.strokeRect(2,2,cv.width-4,cv.height-4);
+  ctx.fillStyle='#00ee44';
+  ctx.font='bold 52px monospace'; ctx.textAlign='center';
+  ctx.fillText(el.currentFloor+1,64,60);
+  // Arrow indicator
+  ctx.font='16px sans-serif';
+  ctx.fillStyle=el.state==='moving'?(el.targetFloor>el.currentFloor?'#00ee44':'#ee4400'):'#004400';
+  ctx.fillText(el.state==='moving'?(el.targetFloor>el.currentFloor?'▲':'▼'):'—',64,18);
+  el.numTex.needsUpdate=true;
+}
+
+function sendElevatorTo(el,floor){
+  if(floor===el.targetFloor&&el.state==='idle') return;
+  el.targetFloor=Math.max(0,Math.min(el.nFloors-1,floor));
+  el.state='moving';
+  refreshElevDisplay(el);
+}
+
+function openElevPanel(el){
+  elevPanelOpen=true;
+  document.exitPointerLock();
+  document.getElementById('elevCurFloor').textContent=el.currentFloor+1;
+  const btns=document.getElementById('elevBtns');
+  btns.innerHTML='';
+  for(let f=0;f<el.nFloors;f++){
+    const b=document.createElement('button');
+    b.className='floor-btn'+(f===el.currentFloor?' active-floor':'');
+    b.textContent=f+1;
+    b.title='קומה '+(f+1);
+    const _el=el,_f=f;
+    b.onclick=()=>{sendElevatorTo(_el,_f);closeElevPanel();};
+    btns.appendChild(b);
+  }
+  document.getElementById('elevPanel').style.display='block';
+}
+
+function closeElevPanel(){
+  elevPanelOpen=false;
+  document.getElementById('elevPanel').style.display='none';
+  if(gameStarted) renderer.domElement.requestPointerLock();
+}
+
+function updateElevators(dt){
+  nearElevator=null;
+  let playerFloor=-1;
+  elevators.forEach(el=>{
+    if(!el.cabin) return; // skip legacy
+    const targetY=el.targetFloor*el.floorH;
+    const curY=el.cabin.position.y;
+    if(Math.abs(curY-targetY)>0.05){
+      const dir=Math.sign(targetY-curY);
+      el.cabin.position.y+=dir*Math.min(Math.abs(targetY-curY),el.speed*dt);
+    } else {
+      if(el.state==='moving'){
+        el.cabin.position.y=targetY;
+        el.currentFloor=el.targetFloor;
+        el.state='idle';
+        refreshElevDisplay(el);
+        // Slide doors open (spread apart)
+        el.dL.position.x=-cWOpen(el); el.dR.position.x=cWOpen(el);
+      }
+    }
+    // Animate door: open when idle at floor, closed when moving
+    const openX=el.cW/2*0.7, closedX=el.cW/4;
+    const doorTarget=el.state==='idle'?openX:closedX;
+    el.dL.position.x+=((-doorTarget)-el.dL.position.x)*Math.min(1,dt*6);
+    el.dR.position.x+=((doorTarget)-el.dR.position.x)*Math.min(1,dt*6);
+    // Player inside cabin?
+    const cabinBottom=el.cabin.position.y;
+    const dx=Math.abs(playerPos.x-el.x), dz=Math.abs(playerPos.z-el.z);
+    const floorY=cabinBottom+0.12;
+    if(dx<el.cW/2-0.15&&dz<el.cD/2-0.15&&playerPos.y>=floorY+1.4&&playerPos.y<floorY+el.cH){
+      playerPos.y=floorY+1.8;
+      playerVel.y=0; onGround=true;
+      nearElevator=el;
+      // Update floor display based on cabin position
+      const f=Math.round(cabinBottom/el.floorH);
+      const clampedF=Math.max(0,Math.min(el.nFloors-1,f));
+      if(clampedF!==el.currentFloor&&el.state==='idle'){
+        el.currentFloor=clampedF; refreshElevDisplay(el);
+      }
+      playerFloor=el.currentFloor;
+    }
+  });
+  // Floor HUD
+  if(playerFloor>=0){
+    document.getElementById('floorHUD').style.display='block';
+    document.getElementById('floorNum').textContent=playerFloor+1;
+  } else {
+    // Still show floor if inside a building based on player Y
+    let inBldg=false;
+    for(const b of apartBuildings){
+      if(Math.abs(playerPos.x-b.x)<b.bw/2&&Math.abs(playerPos.z-b.z)<b.bd/2){
+        const f=Math.max(0,Math.floor(playerPos.y/b.floorH));
+        document.getElementById('floorHUD').style.display='block';
+        document.getElementById('floorNum').textContent=f+1;
+        inBldg=true; break;
+      }
+    }
+    if(!inBldg&&hotelBuilding&&Math.abs(playerPos.x-hotelBuilding.x)<hotelBuilding.bw/2&&Math.abs(playerPos.z-hotelBuilding.z)<hotelBuilding.bd/2){
+      const f=Math.max(0,Math.floor(playerPos.y/hotelBuilding.floorH));
+      document.getElementById('floorHUD').style.display='block';
+      document.getElementById('floorNum').textContent=f+1;
+      inBldg=true;
+    }
+    if(!inBldg) document.getElementById('floorHUD').style.display='none';
+  }
+}
+function cWOpen(el){return el.cW/2*0.7;}
 
 // ─── APARTMENT BUILDINGS ──────────────────────────────────────────────────────
 const apartMeshes=[];
 function mkApartBuilding(x,z,nFloors,bw,bd){
-  const col=0x556677;
-  const floorH=3.8;
+  const floorH=3.8, wallT=0.3;
   const totalH=nFloors*floorH;
-  const buildMat=new THREE.MeshLambertMaterial({color:col});
-  const winMat=new THREE.MeshLambertMaterial({color:0x88ccff,transparent:true,opacity:0.6});
-  const g=new THREE.Group();
-  // Main structure: 4 outer walls as meshes
-  const wallT=0.3;
-  function addWall(wx,wy,wz,ww,wh,wd){
-    const m=new THREE.Mesh(new THREE.BoxGeometry(ww,wh,wd),buildMat.clone());
-    m.position.set(wx,wy,wz);
-    m.castShadow=true; m.receiveShadow=true;
+  // Two-tone facade: concrete base + glass upper
+  const concreteMat=new THREE.MeshLambertMaterial({color:0x5a6472});
+  const glassFacadeMat=new THREE.MeshLambertMaterial({color:0x334455});
+  const accentMat=new THREE.MeshLambertMaterial({color:0x8899aa});
+  const winMat=new THREE.MeshLambertMaterial({color:0x99ccff,transparent:true,opacity:0.75,emissive:0x223344,emissiveIntensity:0.4});
+  const winLitMat=new THREE.MeshLambertMaterial({color:0xffeecc,transparent:true,opacity:0.8,emissive:0xffddaa,emissiveIntensity:0.6});
+  function addAWall(wx,wy,wz,ww,wh,wd,mat){
+    const m=new THREE.Mesh(new THREE.BoxGeometry(ww,wh,wd),mat||concreteMat.clone());
+    m.position.set(wx,wy,wz); m.castShadow=true; m.receiveShadow=true;
     m.userData={isMapObj:true,w:ww,h:wh,d:wd};
-    g.add(m); scene.add(m);
-    mapObjects.push(m); apartMeshes.push(m);
+    scene.add(m); mapObjects.push(m); apartMeshes.push(m); return m;
   }
-  // Back wall
-  addWall(x, totalH/2, z+bd/2, bw, totalH, wallT);
-  // Left wall
-  addWall(x-bw/2, totalH/2, z, wallT, totalH, bd);
-  // Right wall
-  addWall(x+bw/2, totalH/2, z, wallT, totalH, bd);
-  // Front wall split for door (ground floor door 2.2 wide, 3.2 tall)
-  const doorW=2.2, doorH=3.2;
+  // 4 outer walls
+  addAWall(x,totalH/2,z+bd/2, bw,totalH,wallT);
+  addAWall(x-bw/2,totalH/2,z, wallT,totalH,bd);
+  addAWall(x+bw/2,totalH/2,z, wallT,totalH,bd);
+  // Front: door opening 2.4×3.4, rest is wall
+  const doorW=2.4, doorH=3.4;
   const sideW=(bw-doorW)/2;
-  addWall(x-doorW/2-sideW/2, totalH/2, z-bd/2, sideW, totalH, wallT);
-  addWall(x+doorW/2+sideW/2, totalH/2, z-bd/2, sideW, totalH, wallT);
-  addWall(x, doorH+(totalH-doorH)/2, z-bd/2, doorW, totalH-doorH, wallT); // lintel
-  // Floor slabs for each floor
-  for(let f=0;f<nFloors;f++){
-    const fl=new THREE.Mesh(new THREE.BoxGeometry(bw-wallT*2,0.15,bd-wallT*2),new THREE.MeshLambertMaterial({color:0x778899}));
-    fl.position.set(x,f*floorH,z); fl.receiveShadow=true;
-    scene.add(fl); apartMeshes.push(fl);
+  addAWall(x-doorW/2-sideW/2,totalH/2,z-bd/2, sideW,totalH,wallT);
+  addAWall(x+doorW/2+sideW/2,totalH/2,z-bd/2, sideW,totalH,wallT);
+  addAWall(x,doorH+(totalH-doorH)/2,z-bd/2, doorW,totalH-doorH,wallT);
+  // Horizontal floor bands (accent stripes between floors)
+  for(let f=0;f<=nFloors;f++){
+    const band=new THREE.Mesh(new THREE.BoxGeometry(bw+0.05,0.22,bd+0.05),accentMat.clone());
+    band.position.set(x,f*floorH,z); band.castShadow=true;
+    scene.add(band); apartMeshes.push(band);
   }
-  // Roof slab
-  const roofSlab=new THREE.Mesh(new THREE.BoxGeometry(bw+0.4,0.25,bd+0.4),buildMat.clone());
-  roofSlab.position.set(x,totalH+0.125,z); roofSlab.castShadow=true;
-  scene.add(roofSlab); apartMeshes.push(roofSlab);
-  // Windows on each floor
+  // Roof slab + parapet
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(bw+0.5,0.3,bd+0.5),concreteMat.clone());
+  roof.position.set(x,totalH+0.15,z); roof.castShadow=true;
+  scene.add(roof); apartMeshes.push(roof);
+  const parapet=new THREE.Mesh(new THREE.BoxGeometry(bw+0.5,0.6,bd+0.5),accentMat.clone());
+  parapet.position.set(x,totalH+0.6,z);
+  scene.add(parapet); apartMeshes.push(parapet);
+  // Vertical pilasters between windows
+  for(let c=0;c<4;c++){
+    const pil=new THREE.Mesh(new THREE.BoxGeometry(0.25,totalH,0.35),accentMat.clone());
+    pil.position.set(x-bw/2+1.5+c*2.5,totalH/2,z-bd/2-0.1); pil.castShadow=true;
+    scene.add(pil); apartMeshes.push(pil);
+  }
+  // Windows per floor per column (alternating lit)
+  const winCols=Math.floor((bw-2)/2.5);
   for(let f=0;f<nFloors;f++){
-    for(let col2=0;col2<3;col2++){
-      const win=new THREE.Mesh(new THREE.BoxGeometry(0.8,1.1,0.08),winMat.clone());
-      win.position.set(x-bw/2+0.5+col2*2.4, f*floorH+2, z-bd/2-0.05);
+    for(let c=0;c<winCols;c++){
+      const lit=Math.random()>0.4;
+      const wm=lit?winLitMat.clone():winMat.clone();
+      // Front windows
+      const win=new THREE.Mesh(new THREE.BoxGeometry(1.2,1.7,0.1),wm);
+      win.position.set(x-bw/2+1.5+c*2.5, f*floorH+2.2, z-bd/2-0.08);
       scene.add(win); apartMeshes.push(win);
+      // Window frame
+      const frame=new THREE.Mesh(new THREE.BoxGeometry(1.4,1.9,0.06),accentMat.clone());
+      frame.position.set(x-bw/2+1.5+c*2.5, f*floorH+2.2, z-bd/2-0.06);
+      scene.add(frame); apartMeshes.push(frame);
+      // Back windows
+      const winB=new THREE.Mesh(new THREE.BoxGeometry(1.2,1.7,0.1),wm.clone());
+      winB.position.set(x-bw/2+1.5+c*2.5, f*floorH+2.2, z+bd/2+0.08);
+      scene.add(winB); apartMeshes.push(winB);
     }
   }
+  // Lobby: glass panel in entrance area
+  const lobbyGlass=new THREE.Mesh(new THREE.BoxGeometry(doorW-0.1,doorH-0.1,0.06),
+    new THREE.MeshLambertMaterial({color:0xaaddff,transparent:true,opacity:0.25}));
+  lobbyGlass.position.set(x,doorH/2,z-bd/2+0.5);
+  scene.add(lobbyGlass); apartMeshes.push(lobbyGlass);
+  // Entrance awning
+  const awning=new THREE.Mesh(new THREE.BoxGeometry(doorW+1.5,0.15,1.8),
+    new THREE.MeshLambertMaterial({color:0x334466}));
+  awning.position.set(x,doorH,z-bd/2-0.6); awning.castShadow=true;
+  scene.add(awning); apartMeshes.push(awning);
   // Door pivot
   const dPivot=new THREE.Group();
-  dPivot.position.set(x-doorW/2+0.04, 0, z-bd/2);
+  dPivot.position.set(x-doorW/2+0.05,0,z-bd/2);
   scene.add(dPivot); apartMeshes.push(dPivot);
-  const dPanel=new THREE.Mesh(
-    new THREE.BoxGeometry(doorW-0.1, doorH-0.12, 0.1),
-    new THREE.MeshLambertMaterial({color:0x6a4830})
-  );
-  dPanel.position.set(doorW/2, doorH/2, 0);
-  dPanel.castShadow=true; dPivot.add(dPanel);
+  const dPanel=new THREE.Mesh(new THREE.BoxGeometry(doorW-0.12,doorH-0.14,0.09),
+    new THREE.MeshLambertMaterial({color:0x667788,transparent:true,opacity:0.8}));
+  dPanel.position.set(doorW/2,doorH/2,0); dPanel.castShadow=true; dPivot.add(dPanel);
   const dObj={pivot:dPivot,open:false,targetRot:0,currentRot:0};
   allDoors.push(dObj);
-  // Interior point light
-  const iLight=new THREE.PointLight(0xffeedd,0.8,bw*1.5);
-  iLight.position.set(x,2,z); scene.add(iLight); apartMeshes.push(iLight);
-  // Elevator inside building
-  const elev=mkElevator(x,z+1,0,totalH,0x778899);
-  // Sign
-  const cv2=document.createElement('canvas'); cv2.width=256; cv2.height=80;
-  const ctx2=cv2.getContext('2d');
-  ctx2.fillStyle='rgba(80,100,140,0.92)'; ctx2.roundRect(4,4,248,72,12); ctx2.fill();
-  ctx2.fillStyle='#fff'; ctx2.font='bold 24px Arial'; ctx2.textAlign='center';
-  ctx2.fillText('🏢 דירות למכירה',128,32);
-  ctx2.font='16px Arial'; ctx2.fillStyle='#ffcc00';
-  ctx2.fillText(`${nFloors} קומות | לחץ E`,128,62);
-  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv2),transparent:true,depthTest:false}));
-  sp.scale.set(5,1.56,1); sp.position.set(x,totalH+3,z);
-  scene.add(sp); apartMeshes.push(sp);
-  // Build apartments data
-  const apts=[];
-  for(let f=0;f<nFloors;f++){
-    apts.push({floor:f,price:500+f*300,owned:false,ownerName:''});
+  // Interior lobby lights
+  const lobbyL=new THREE.PointLight(0xffeedd,1.5,bw);
+  lobbyL.position.set(x,2.5,z); scene.add(lobbyL); apartMeshes.push(lobbyL);
+  // Per-floor corridor lights
+  for(let f=1;f<nFloors;f++){
+    const fl=new THREE.PointLight(0xffeedd,0.6,bw*0.8);
+    fl.position.set(x,f*floorH+1.5,z); scene.add(fl); apartMeshes.push(fl);
   }
-  const bld={x,z,bw,bd,nFloors,floorH,totalH,apts,sign:sp,signCanvas:cv2,signCtx:ctx2,door:dObj};
+  // Real elevator cabin inside
+  const elevX=x+bw/2-2, elevZ=z;
+  const elev=mkElevatorCabin(elevX,elevZ,nFloors,floorH,apartMeshes);
+  // Building sign (floating sprite)
+  const cv2=document.createElement('canvas'); cv2.width=320; cv2.height=96;
+  const ctx2=cv2.getContext('2d');
+  const grad=ctx2.createLinearGradient(0,0,0,96);
+  grad.addColorStop(0,'rgba(40,60,100,0.96)'); grad.addColorStop(1,'rgba(20,35,65,0.96)');
+  ctx2.fillStyle=grad; ctx2.roundRect(4,4,312,88,14); ctx2.fill();
+  ctx2.strokeStyle='#8899bb'; ctx2.lineWidth=2; ctx2.roundRect(4,4,312,88,14); ctx2.stroke();
+  ctx2.fillStyle='#ddeeff'; ctx2.font='bold 26px Arial'; ctx2.textAlign='center';
+  ctx2.fillText('🏢 דירות יוקרה',160,36);
+  ctx2.fillStyle='#ffcc00'; ctx2.font='16px Arial';
+  ctx2.fillText(`${nFloors} קומות | לחץ E לרכישה`,160,68);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv2),transparent:true,depthTest:false}));
+  sp.scale.set(6,1.8,1); sp.position.set(x,totalH+3.5,z);
+  scene.add(sp); apartMeshes.push(sp);
+  // Apartments data
+  const apts=[];
+  for(let f=0;f<nFloors;f++) apts.push({floor:f,price:500+f*300,owned:false,ownerName:''});
+  const bld={x,z,bw,bd,nFloors,floorH,totalH,apts,sign:sp,signCanvas:cv2,signCtx:ctx2,door:dObj,elev};
   apartBuildings.push(bld);
   return bld;
 }
@@ -2811,83 +3029,152 @@ const HOTEL_ROOMS=[
 ];
 
 function mkHotel(x,z){
-  const bw=14, bd=12, nFloors=5, floorH=3.8;
+  const bw=16, bd=13, nFloors=6, floorH=3.8;
   const totalH=nFloors*floorH;
   const wallT=0.3;
-  const buildMat=new THREE.MeshLambertMaterial({color:0x997755});
-  const winMat=new THREE.MeshLambertMaterial({color:0xffeecc,transparent:true,opacity:0.65});
-  function addHWall(wx,wy,wz,ww,wh,wd){
-    const m=new THREE.Mesh(new THREE.BoxGeometry(ww,wh,wd),buildMat.clone());
+  // Materials
+  const stoneMat=new THREE.MeshLambertMaterial({color:0xb8a888});  // cream stone
+  const darkMat=new THREE.MeshLambertMaterial({color:0x554433});   // dark trim
+  const goldMat=new THREE.MeshLambertMaterial({color:0xddaa44,emissive:0xcc9922,emissiveIntensity:0.3});
+  const winWarmMat=new THREE.MeshLambertMaterial({color:0xffeecc,transparent:true,opacity:0.8,emissive:0xffcc88,emissiveIntensity:0.5});
+  function addHWall(wx,wy,wz,ww,wh,wd,mat){
+    const m=new THREE.Mesh(new THREE.BoxGeometry(ww,wh,wd),(mat||stoneMat).clone());
     m.position.set(wx,wy,wz); m.castShadow=true; m.receiveShadow=true;
     m.userData={isMapObj:true,w:ww,h:wh,d:wd};
-    scene.add(m); mapObjects.push(m); hotelMeshes.push(m);
+    scene.add(m); mapObjects.push(m); hotelMeshes.push(m); return m;
   }
-  addHWall(x, totalH/2, z+bd/2, bw, totalH, wallT);
-  addHWall(x-bw/2, totalH/2, z, wallT, totalH, bd);
-  addHWall(x+bw/2, totalH/2, z, wallT, totalH, bd);
-  // Front with large entrance (4 wide)
-  const entrW=4, entrH=4.5;
+  // Outer walls
+  addHWall(x,totalH/2,z+bd/2, bw,totalH,wallT);
+  addHWall(x-bw/2,totalH/2,z, wallT,totalH,bd);
+  addHWall(x+bw/2,totalH/2,z, wallT,totalH,bd);
+  // Front: grand entrance 5 wide × 5 tall
+  const entrW=5, entrH=5;
   const sideW=(bw-entrW)/2;
-  addHWall(x-entrW/2-sideW/2, totalH/2, z-bd/2, sideW, totalH, wallT);
-  addHWall(x+entrW/2+sideW/2, totalH/2, z-bd/2, sideW, totalH, wallT);
-  addHWall(x, entrH+(totalH-entrH)/2, z-bd/2, entrW, totalH-entrH, wallT);
-  // Floor slabs
-  for(let f=0;f<nFloors;f++){
-    const fl=new THREE.Mesh(new THREE.BoxGeometry(bw-wallT*2,0.15,bd-wallT*2),new THREE.MeshLambertMaterial({color:0xaa9977}));
-    fl.position.set(x,f*floorH,z); fl.receiveShadow=true;
-    scene.add(fl); hotelMeshes.push(fl);
+  addHWall(x-entrW/2-sideW/2,totalH/2,z-bd/2, sideW,totalH,wallT);
+  addHWall(x+entrW/2+sideW/2,totalH/2,z-bd/2, sideW,totalH,wallT);
+  addHWall(x,entrH+(totalH-entrH)/2,z-bd/2, entrW,totalH-entrH,wallT);
+  // Horizontal floor bands in gold
+  for(let f=0;f<=nFloors;f++){
+    const band=new THREE.Mesh(new THREE.BoxGeometry(bw+0.15,0.28,bd+0.15),goldMat.clone());
+    band.position.set(x,f*floorH,z); band.castShadow=true;
+    scene.add(band); hotelMeshes.push(band);
   }
-  // Roof
-  const roofSlab=new THREE.Mesh(new THREE.BoxGeometry(bw+0.5,0.3,bd+0.5),buildMat.clone());
-  roofSlab.position.set(x,totalH+0.15,z); roofSlab.castShadow=true;
-  scene.add(roofSlab); hotelMeshes.push(roofSlab);
-  // Roof decorative spire
-  const spire=new THREE.Mesh(new THREE.CylinderGeometry(0,1.2,4,4),buildMat.clone());
-  spire.position.set(x,totalH+2.3,z); spire.castShadow=true;
+  // Roof slab + classical parapet
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(bw+0.6,0.4,bd+0.6),stoneMat.clone());
+  roof.position.set(x,totalH+0.2,z); roof.castShadow=true;
+  scene.add(roof); hotelMeshes.push(roof);
+  // Roof parapet
+  const parapet=new THREE.Mesh(new THREE.BoxGeometry(bw+0.6,0.8,bd+0.6),stoneMat.clone());
+  parapet.position.set(x,totalH+0.8,z);
+  scene.add(parapet); hotelMeshes.push(parapet);
+  // Corner towers (turrets)
+  [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sz])=>{
+    const turr=new THREE.Mesh(new THREE.BoxGeometry(2,totalH+1.5,2),stoneMat.clone());
+    turr.position.set(x+sx*(bw/2-0.8),( totalH+1.5)/2,z+sz*(bd/2-0.8));
+    turr.castShadow=true; turr.userData={isMapObj:true,w:2,h:totalH+1.5,d:2};
+    scene.add(turr); mapObjects.push(turr); hotelMeshes.push(turr);
+    const cap=new THREE.Mesh(new THREE.CylinderGeometry(0,1.2,2.5,4),darkMat.clone());
+    cap.position.set(x+sx*(bw/2-0.8),totalH+2.75,z+sz*(bd/2-0.8));
+    cap.castShadow=true; scene.add(cap); hotelMeshes.push(cap);
+  });
+  // Central spire
+  const spire=new THREE.Mesh(new THREE.CylinderGeometry(0,1,5,6),goldMat.clone());
+  spire.position.set(x,totalH+4,z); spire.castShadow=true;
   scene.add(spire); hotelMeshes.push(spire);
-  // Windows
+  // Gold ball on spire
+  const ball=new THREE.Mesh(new THREE.SphereGeometry(0.35,8,8),goldMat.clone());
+  ball.position.set(x,totalH+6.6,z); scene.add(ball); hotelMeshes.push(ball);
+  // Vertical stone pilasters on facade
+  for(let c=-2;c<=2;c++){
+    const pil=new THREE.Mesh(new THREE.BoxGeometry(0.4,totalH,0.5),stoneMat.clone());
+    pil.position.set(x+c*2.8,totalH/2,z-bd/2-0.2); pil.castShadow=true;
+    scene.add(pil); hotelMeshes.push(pil);
+  }
+  // Windows (warm glowing, all floors)
   for(let f=0;f<nFloors;f++){
     for(let c=-2;c<=2;c++){
-      if(f===0&&Math.abs(c)<1) continue; // ground floor entrance
-      const win=new THREE.Mesh(new THREE.BoxGeometry(1.0,1.4,0.08),winMat.clone());
-      win.position.set(x+c*2.4, f*floorH+2.1, z-bd/2-0.05);
+      if(f===0&&Math.abs(c)<1.5) continue; // entrance gap
+      const win=new THREE.Mesh(new THREE.BoxGeometry(1.3,1.9,0.1),winWarmMat.clone());
+      win.position.set(x+c*2.8, f*floorH+2.3, z-bd/2-0.08);
       scene.add(win); hotelMeshes.push(win);
+      // Arch above window (decorative)
+      const arch=new THREE.Mesh(new THREE.BoxGeometry(1.5,0.3,0.1),goldMat.clone());
+      arch.position.set(x+c*2.8, f*floorH+3.35, z-bd/2-0.08);
+      scene.add(arch); hotelMeshes.push(arch);
+    }
+    // Side windows
+    for(let c=-1;c<=1;c++){
+      const winS=new THREE.Mesh(new THREE.BoxGeometry(0.1,1.9,1.3),winWarmMat.clone());
+      winS.position.set(x+bw/2+0.08, f*floorH+2.3, z+c*3.5);
+      scene.add(winS); hotelMeshes.push(winS);
+      const winS2=new THREE.Mesh(new THREE.BoxGeometry(0.1,1.9,1.3),winWarmMat.clone());
+      winS2.position.set(x-bw/2-0.08, f*floorH+2.3, z+c*3.5);
+      scene.add(winS2); hotelMeshes.push(winS2);
     }
   }
-  // Door pivot
+  // Grand entrance awning
+  const awning=new THREE.Mesh(new THREE.BoxGeometry(entrW+2,0.18,2.5),darkMat.clone());
+  awning.position.set(x,entrH+0.1,z-bd/2-1.1); awning.castShadow=true;
+  scene.add(awning); hotelMeshes.push(awning);
+  // Awning supports
+  for(let s=-1;s<=1;s+=2){
+    const col=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,entrH+0.1,8),goldMat.clone());
+    col.position.set(x+s*(entrW/2+0.8),(entrH+0.1)/2,z-bd/2-2.2);
+    scene.add(col); hotelMeshes.push(col);
+  }
+  // Glass doors (pivot)
   const dPivot=new THREE.Group();
-  dPivot.position.set(x-entrW/2+0.05, 0, z-bd/2);
+  dPivot.position.set(x-entrW/2+0.05,0,z-bd/2);
   scene.add(dPivot); hotelMeshes.push(dPivot);
-  const dPanel=new THREE.Mesh(
-    new THREE.BoxGeometry(entrW-0.1, entrH-0.15, 0.1),
-    new THREE.MeshLambertMaterial({color:0x7a5c3a})
-  );
-  dPanel.position.set(entrW/2, entrH/2, 0); dPanel.castShadow=true; dPivot.add(dPanel);
+  const dPanel=new THREE.Mesh(new THREE.BoxGeometry(entrW-0.12,entrH-0.18,0.09),
+    new THREE.MeshLambertMaterial({color:0xaaddff,transparent:true,opacity:0.55}));
+  dPanel.position.set(entrW/2,entrH/2,0); dPanel.castShadow=true; dPivot.add(dPanel);
   const dObj={pivot:dPivot,open:false,targetRot:0,currentRot:0};
   allDoors.push(dObj);
-  // Reception desk inside
-  const desk=new THREE.Mesh(new THREE.BoxGeometry(4,1.1,1.2),new THREE.MeshLambertMaterial({color:0x885533}));
-  desk.position.set(x,0.55,z+2); desk.castShadow=true;
-  scene.add(desk); hotelMeshes.push(desk);
+  // Lobby interior
+  // Reception counter (L-shaped)
+  const counter=new THREE.Mesh(new THREE.BoxGeometry(5,1.1,1.2),new THREE.MeshLambertMaterial({color:0x7a5530}));
+  counter.position.set(x,0.55,z+2.5); counter.castShadow=true;
+  scene.add(counter); hotelMeshes.push(counter);
+  // Gold trim on counter
+  const counterTop=new THREE.Mesh(new THREE.BoxGeometry(5.1,0.1,1.3),goldMat.clone());
+  counterTop.position.set(x,1.15,z+2.5); scene.add(counterTop); hotelMeshes.push(counterTop);
+  // Lobby carpet (decorative floor)
+  const carpet=new THREE.Mesh(new THREE.BoxGeometry(bw*0.7,0.02,bd*0.5),
+    new THREE.MeshLambertMaterial({color:0x882222}));
+  carpet.position.set(x,0.01,z); scene.add(carpet); hotelMeshes.push(carpet);
+  // Lobby chandelier
+  const chandBase=new THREE.Mesh(new THREE.CylinderGeometry(0.8,0.2,0.3,12),goldMat.clone());
+  chandBase.position.set(x,floorH-0.4,z-1); scene.add(chandBase); hotelMeshes.push(chandBase);
+  const chandLight=new THREE.PointLight(0xffeecc,3,bw);
+  chandLight.position.set(x,floorH-0.6,z-1); scene.add(chandLight); hotelMeshes.push(chandLight);
+  // Per-floor corridor lights
+  for(let f=1;f<nFloors;f++){
+    const fl=new THREE.PointLight(0xffeecc,1,bw*0.9);
+    fl.position.set(x,f*floorH+2,z); scene.add(fl); hotelMeshes.push(fl);
+  }
   // Elevator
-  mkElevator(x-3,z+1,0,totalH,0xaa9977);
-  // Warm lighting
-  const lobbyLight=new THREE.PointLight(0xffddaa,2,bw*1.5);
-  lobbyLight.position.set(x,3,z); scene.add(lobbyLight); hotelMeshes.push(lobbyLight);
-  // Hotel sign
-  const cv3=document.createElement('canvas'); cv3.width=320; cv3.height=100;
+  const elevX=x+bw/2-2.2, elevZ=z+bd/2-2.2;
+  mkElevatorCabin(elevX,elevZ,nFloors,floorH,hotelMeshes);
+  // Gold "GRAND HOTEL" sign on facade
+  const cv3=document.createElement('canvas'); cv3.width=480; cv3.height=120;
   const ctx3=cv3.getContext('2d');
-  ctx3.fillStyle='rgba(180,120,40,0.95)'; ctx3.roundRect(4,4,312,92,16); ctx3.fill();
-  ctx3.fillStyle='#fff8dc'; ctx3.font='bold 30px Arial'; ctx3.textAlign='center';
-  ctx3.fillText('🏨 GRAND HOTEL',160,38);
-  ctx3.font='18px Arial'; ctx3.fillStyle='#ffee88';
-  ctx3.fillText('לחץ E להזמנת חדר',160,76);
+  const grd=ctx3.createLinearGradient(0,0,0,120);
+  grd.addColorStop(0,'rgba(180,130,30,0.97)'); grd.addColorStop(1,'rgba(120,80,10,0.97)');
+  ctx3.fillStyle=grd; ctx3.roundRect(4,4,472,112,18); ctx3.fill();
+  ctx3.strokeStyle='#ffeeaa'; ctx3.lineWidth=3; ctx3.roundRect(4,4,472,112,18); ctx3.stroke();
+  ctx3.fillStyle='#fff8dc'; ctx3.font='bold 38px serif'; ctx3.textAlign='center';
+  ctx3.fillText('🏨 GRAND HOTEL',240,50);
+  ctx3.fillStyle='#ffee88'; ctx3.font='20px Arial';
+  ctx3.fillText('לחץ E לכניסה • חדרים לשכירה',240,90);
   const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv3),transparent:true,depthTest:false}));
-  sp.scale.set(7,2.2,1); sp.position.set(x,totalH+4,z);
+  sp.scale.set(10,2.5,1); sp.position.set(x,totalH+4.5,z);
   scene.add(sp); hotelMeshes.push(sp);
-  // Neon light
-  const neon=new THREE.PointLight(0xffaa33,4,30);
-  neon.position.set(x,totalH+1,z-bd/2-1); scene.add(neon); hotelMeshes.push(neon);
+  // Neon warm glow on facade
+  const neon1=new THREE.PointLight(0xffaa44,5,35);
+  neon1.position.set(x,totalH*0.6,z-bd/2-0.5); scene.add(neon1); hotelMeshes.push(neon1);
+  const neon2=new THREE.PointLight(0xffdd88,3,20);
+  neon2.position.set(x,totalH+1,z); scene.add(neon2); hotelMeshes.push(neon2);
   hotelBuilding={x,z,bw,bd,nFloors,floorH,totalH,door:dObj,rooms:HOTEL_ROOMS.map(r=>({...r,occupied:false}))};
   return hotelBuilding;
 }
@@ -2957,7 +3244,7 @@ function spawnHouses(){
   // Clear all doors first
   allDoors.forEach(d=>{if(d.pivot)scene.remove(d.pivot);}); allDoors.length=0;
   // Clear elevators
-  elevators.forEach(e=>scene.remove(e.mesh)); elevators.length=0;
+  elevators.forEach(e=>{if(e.cabin)scene.remove(e.cabin);if(e.shaft)scene.remove(e.shaft);}); elevators.length=0;
   houses.length=0;
   houseMeshes.forEach(m=>scene.remove(m)); houseMeshes.length=0;
   const spots=[
