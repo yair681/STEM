@@ -1240,13 +1240,13 @@ function explosionFX(pos,radius,dmg,fromEnemy){
         }
       });
     }
-    // Damage structures (only enemy explosions hurt player's structures)
-    if(fromEnemy){
-      for(let i=structures.length-1;i>=0;i--){
-        if(structures[i].position.distanceTo(pos)<radius*1.2){
-          structures[i].userData.hp-=dmg*0.7;
-          if(structures[i].userData.hp<=0){scene.remove(structures[i]);structures.splice(i,1);}
-        }
+  }
+  // Damage structures (only enemy explosions hurt player's structures)
+  if(fromEnemy){
+    for(let i=structures.length-1;i>=0;i--){
+      if(structures[i].position.distanceTo(pos)<radius*1.2){
+        structures[i].userData.hp-=dmg*0.7;
+        if(structures[i].userData.hp<=0){scene.remove(structures[i]);structures.splice(i,1);}
       }
     }
   }
@@ -1322,6 +1322,40 @@ function updateProjectiles(dt){
             const wDef=WEAPONS[p.wk];
             if(wDef?.splash) explosionFX(p.mesh.position.clone(),wDef.splash,wDef.damage,false);
             else socket.emit('playerHit',{targetId:id,damage:wDef?.damage||30});
+            hit=true; break;
+          }
+        }
+      }
+      // Check vehicle hits for projectiles
+      if(!hit){
+        const wDef=WEAPONS[p.wk];
+        for(const t of tanks){
+          if(p.mesh.position.distanceTo(t.pos)<3){
+            if(t.hp===undefined)t.hp=200;
+            t.hp-=wDef.damage||50;
+            if(t.hp<=0){explosionFX(t.pos.clone(),10,100,false);scene.remove(t.mesh);tanks.splice(tanks.indexOf(t),1);if(currentTank===t){inTank=false;currentTank=null;hp=Math.max(0,hp-80);updateHUD();}}
+            hit=true; break;
+          }
+        }
+      }
+      if(!hit){
+        const wDef=WEAPONS[p.wk];
+        for(const h of helicopters){
+          if(p.mesh.position.distanceTo(h.pos)<3){
+            if(h.hp===undefined)h.hp=150;
+            h.hp-=wDef.damage||50;
+            if(h.hp<=0){explosionFX(h.pos.clone(),10,100,false);scene.remove(h.mesh);helicopters.splice(helicopters.indexOf(h),1);if(currentHeli===h){inHeli=false;currentHeli=null;hp=Math.max(0,hp-80);updateHUD();}}
+            hit=true; break;
+          }
+        }
+      }
+      if(!hit){
+        const wDef=WEAPONS[p.wk];
+        for(const c of cars){
+          if(p.mesh.position.distanceTo(c.pos)<2.5){
+            if(c.hp===undefined)c.hp=120;
+            c.hp-=wDef.damage||50;
+            if(c.hp<=0){explosionFX(c.pos.clone(),8,80,false);scene.remove(c.mesh);cars.splice(cars.indexOf(c),1);if(currentCar===c){inCar=false;currentCar=null;hp=Math.max(0,hp-50);updateHUD();}}
             hit=true; break;
           }
         }
@@ -1545,15 +1579,16 @@ function updatePlayer(dt){
   });
   // Floor/collision from map objects (buildings etc.)
   mapObjects.forEach(s=>{
-    const hw=s.userData.w/2+0.4, hd=s.userData.d/2+0.4;
+    const hw=s.userData.w/2+0.15, hd=s.userData.d/2+0.15;
     const dx=playerPos.x-s.position.x, dz=playerPos.z-s.position.z;
     if(Math.abs(dx)<hw&&Math.abs(dz)<hd){
       const topY=s.position.y+s.userData.h/2;
       const botY=s.position.y-s.userData.h/2;
       if(playerPos.y>topY-0.5&&playerPos.y<topY+2.5) floorY=Math.max(floorY,topY);
-      else if(playerPos.y<=topY&&playerPos.y>botY-1.8){
+      else if(playerPos.y<=topY&&playerPos.y>botY){
         // Push out horizontally (only when player body actually overlaps the object's height range)
-        if(Math.abs(dx)/hw<Math.abs(dz)/hd) playerPos.x=s.position.x+(dx>0?hw:-hw);
+        const overlapX=hw-Math.abs(dx), overlapZ=hd-Math.abs(dz);
+        if(overlapX<overlapZ) playerPos.x=s.position.x+(dx>0?hw:-hw);
         else playerPos.z=s.position.z+(dz>0?hd:-hd);
       }
     }
@@ -1931,6 +1966,7 @@ document.addEventListener('mouseup',e=>{
 document.addEventListener('wheel',e=>{
   if(isZoomed){
     zoomFOV=Math.max(8,Math.min(60,zoomFOV+e.deltaY*.03));
+    zoomFOV=Math.max(15,Math.min(80,zoomFOV));
     camera.fov=zoomFOV; camera.updateProjectionMatrix();
   }
 });
@@ -1940,7 +1976,11 @@ window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camer
 
 function setWeapon(k){
   if(!playerWeapons[k]) return;
-  currentWeaponKey=k; updateWeaponModel(); updateHUD();
+  if(autoShootIv){clearInterval(autoShootIv);autoShootIv=null;}
+  reloading=false;
+  currentWeaponKey=k;
+  if(currentWeaponKey!=='minigun'){minigunWarmup=0;minigunReady=false;}
+  updateWeaponModel(); updateHUD();
 }
 function switchWeapon(){
   const ks=Object.keys(playerWeapons);
@@ -2359,8 +2399,8 @@ function checkKillStreak(){
     // Spawn 8 rockets from sky over enemy area
     for(let i=0;i<8;i++){
       setTimeout(()=>{
-        const ex=new THREE.Vector3((Math.random()-.5)*120,0,(Math.random()-.5)*120);
-        explosionFX(ex.clone().add(new THREE.Vector3(0,1,0)),12,120,false);
+        const ex=new THREE.Vector3((Math.random()-.5)*120,1,(Math.random()-.5)*120);
+        explosionFX(ex,12,120,false);
       },i*300);
     }
   }
@@ -2377,7 +2417,6 @@ function gunGameOnKill(){
   playerWeapons[wk]={ammo:WEAPONS[wk].ammo,reserve:WEAPONS[wk].reserve};
   currentWeaponKey=wk; updateWeaponModel(); updateHUD();
   flashHUD('🔫 NEXT: '+WEAPONS[wk].name);
-  if(gunGameIdx===GUN_GAME_SEQ.length-1) setTimeout(()=>endGame(),1500);
 }
 function gunGameOnDeath(){
   if(roomGameMode!=='gun') return;
@@ -2563,7 +2602,7 @@ function updateHelicopters(dt){
   // Vertical movement: Space=up, Ctrl/ShiftLeft=down
   const upSpd=12;
   if(keys['Space']) heli.velY=Math.min(upSpd,heli.velY+10*dt);
-  else if(keys['ControlLeft']||keys['ShiftLeft']) heli.velY=Math.max(-8,heli.velY-10*dt);
+  else if(keys['ControlLeft']) heli.velY=Math.max(-8,heli.velY-10*dt);
   else{heli.velY*=Math.max(0,1-dt*4);}
   // Apply movement
   heli.pos.x+=Math.sin(-heli.rot)*heli.vel*dt;
@@ -2775,7 +2814,6 @@ function updateCars(dt){
       const targetAngle=Math.atan2(-tdx,tdz);
       const angleDiff=Math.atan2(Math.sin(targetAngle-car.rot),Math.cos(targetAngle-car.rot));
       car.rot+=angleDiff*dt*5;
-      yaw=car.rot;
       // Slow down near dest
       const taxiSpeed=tdist<20?Math.max(4,tdist*0.7):20;
       car.vel=Math.min(taxiSpeed,car.vel+10*dt);
@@ -2980,8 +3018,8 @@ function mkHouse(x, z, price){
   doorPanel.position.set(doorW/2, doorH/2, 0);
   doorPanel.castShadow=true;
   doorPivot.add(doorPanel);
-  const doorObj={pivot:doorPivot,open:true,targetRot:-Math.PI/2,currentRot:-Math.PI/2,houseRef:null};
-  doorPivot.rotation.y=-Math.PI/2;
+  const doorObj={pivot:doorPivot,open:false,targetRot:0,currentRot:0,houseRef:null};
+  doorPivot.rotation.y=0;
   allDoors.push(doorObj);
   houseMeshes.push(doorPanel);
 
@@ -3210,8 +3248,8 @@ function updateElevators(dt){
     const dx=Math.abs(playerPos.x-el.x), dz=Math.abs(playerPos.z-el.z);
     const floorY=cabinBottom+0.12;
     if(dx<el.cW/2-0.15&&dz<el.cD/2-0.15&&playerPos.y>=floorY+1.4&&playerPos.y<floorY+el.cH){
-      playerPos.y=floorY+1.8;
-      playerVel.y=0; onGround=true;
+      if(playerPos.y<floorY+1.8){playerPos.y=floorY+1.8;playerVel.y=0;}
+      onGround=true;
       nearElevator=el;
       // Update floor display based on cabin position
       const f=Math.round(cabinBottom/el.floorH);
@@ -3824,7 +3862,9 @@ function closeHotelOverlay(){
 
 function updateHotel(dt){
   if(playerHotelRoomIdx<0) return;
-  hotelTimeLeft=Math.max(0,hotelTimeLeft-dt);
+  if(hotelBuilding&&Math.abs(playerPos.x-hotelBuilding.x)<hotelBuilding.bw/2+2&&Math.abs(playerPos.z-hotelBuilding.z)<hotelBuilding.bd/2+2){
+    hotelTimeLeft=Math.max(0,hotelTimeLeft-dt);
+  }
   const mins=Math.floor(hotelTimeLeft/60), secs=Math.floor(hotelTimeLeft%60);
   document.getElementById('hotelTimerNum').textContent=`${mins}:${String(secs).padStart(2,'0')}`;
   // Slow heal while in hotel area
@@ -4048,6 +4088,9 @@ function loop(t){
     weaponPickups.forEach(p=>{
       if(p.active){p.floatT+=dt;p.mesh.position.y=p.baseY+Math.sin(p.floatT*2)*.18;p.mesh.rotation.y+=dt;}
     });
+    for(let i=weaponPickups.length-1;i>=0;i--){
+      if(!weaponPickups[i].active){scene.remove(weaponPickups[i].mesh);weaponPickups.splice(i,1);}
+    }
     healthPickups.forEach(p=>{
       if(p.active){p.floatT+=dt;p.mesh.position.y=p.baseY+Math.sin(p.floatT*2)*.15;p.mesh.rotation.y+=dt*.8;}
     });
